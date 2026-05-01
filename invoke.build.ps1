@@ -12,9 +12,21 @@ $ImageName = "$($RegistryUser)/expensetracker-go"
 $ImageTag = "$($ImageName):$($VersionString)"
 $ImageTagLatest = "$($ImageName):latest"
 
+# Synopsis: Runs all tests
+task test test-domain, test-repository-sqlite, {
+
+}
+
 # Synopsis: Runs tests on the domain package
 task test-domain {
     exec {
         go test -v ./internal/domain
+    }
+}
+
+# Synopsis: Runs tests on the repository/sqlite package
+task test-repository-sqlite {
+    exec {
+        go test -v ./internal/repository/sqlite
     }
 }

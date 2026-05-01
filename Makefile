@@ -11,6 +11,13 @@ IMAGE_TAG_LATEST = $(IMAGE_NAME):latest
 
 IMAGE_PLATFORMS ?= linux/amd64,linux/arm64,linux/ppc64le,linux/s390x
 
+.PHONY: test
+test: test-domain test-repo-sqlite
+
 .PHONY: test-domain
 test-domain:
 	go test -v ./internal/domain
+
+.PHONY: test-repo-sqlite
+test-repo-sqlite:
+	go test -v ./internal/repository/sqlite
