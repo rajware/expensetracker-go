@@ -11,4 +11,10 @@ var (
 	ErrInvalidCredentials = errors.New("invalid username or password")
 	ErrUsernameEmpty      = errors.New("username must not be empty")
 	ErrPasswordTooShort   = errors.New("password must be at least 8 characters")
+
+	// Expense errors
+	ErrExpenseNotFound   = errors.New("expense not found")
+	ErrExpenseNotOwned   = errors.New("expense does not belong to this user")
+	ErrDescriptionEmpty  = errors.New("description must not be empty")
+	ErrAmountNotPositive = errors.New("amount must be greater than zero")
 )

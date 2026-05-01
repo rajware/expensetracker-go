@@ -16,6 +16,22 @@ type User struct {
 	PasswordHash string
 }
 
+// UserView is the "display" representation of an User.
+// It does not include PasswordHash for security.
+type UserView struct {
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+}
+
+func NewUserView(user *User) UserView {
+	return UserView{
+		ID:          user.ID,
+		Username:    user.Username,
+		DisplayName: user.DisplayName,
+	}
+}
+
 // UserRepository is implemented by storage plugins
 type UserRepository interface {
 	Create(ctx context.Context, u *User) error
@@ -82,16 +98,21 @@ func (s UserService) SignIn(ctx context.Context, username, password string) (*Us
 	return user, nil
 }
 
-// GetByID returns the User with the given ID.
-// Useful when hydrating a full User from a stored session or token.
-func (s UserService) GetByID(ctx context.Context, id string) (*User, error) {
-	return s.users.GetByID(ctx, id)
+// QueryByID returns a view of the User with the given ID.
+func (s UserService) QueryByID(ctx context.Context, id string) (*UserView, error) {
+	user, err := s.users.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	result := NewUserView(user)
+	return &result, nil
 }
 
 // UpdateDisplayName updates the display name of the User with the
 // given ID. It can be used to remove a display name by passing an
 // empty string.
-func (s UserService) UpdateDisplayName(ctx context.Context, id string, newDisplayName string) (*User, error) {
+func (s UserService) UpdateDisplayName(ctx context.Context, id string, newDisplayName string) (*UserView, error) {
 	user, err := s.users.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -103,7 +124,8 @@ func (s UserService) UpdateDisplayName(ctx context.Context, id string, newDispla
 		return nil, err
 	}
 
-	return user, nil
+	result := NewUserView(user)
+	return &result, nil
 }
 
 // CloseAccountByID permanently deletes the user's account.
