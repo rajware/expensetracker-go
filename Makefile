@@ -10,3 +10,7 @@ IMAGE_TAG = $(IMAGE_NAME):$(VERSION_STRING)
 IMAGE_TAG_LATEST = $(IMAGE_NAME):latest
 
 IMAGE_PLATFORMS ?= linux/amd64,linux/arm64,linux/ppc64le,linux/s390x
+
+.PHONY: test-domain
+test-domain:
+	go test -v ./internal/domain

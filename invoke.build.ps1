@@ -12,3 +12,9 @@ $ImageName = "$($RegistryUser)/expensetracker-go"
 $ImageTag = "$($ImageName):$($VersionString)"
 $ImageTagLatest = "$($ImageName):latest"
 
+# Synopsis: Runs tests on the domain package
+task test-domain {
+    exec {
+        go test -v ./internal/domain
+    }
+}
