@@ -12,6 +12,14 @@ $ImageName = "$($RegistryUser)/expensetracker-go"
 $ImageTag = "$($ImageName):$($VersionString)"
 $ImageTagLatest = "$($ImageName):latest"
 
+# Synopsis: Builds the tracker-web executable
+task out-tracker-web -Outputs out/tracker-web -Inputs (Get-ChildItem -Recurse -File ./cmd/tracker-web, ./internal/) {
+    exec {
+        $env:CGO_ENABLED=0
+        go build -o $($Outputs) -ldflags "-X main.version=$($VersionString)" ./cmd/tracker-web
+    }
+}
+
 # Synopsis: Runs all tests
 task test test-domain, test-repository-sqlite, test-auth-cookie, test-rest-api, {
 
@@ -43,4 +51,19 @@ task test-rest-api {
     exec {
         go test -v ./internal/api/rest
     }
+}
+
+# Synopsis: Cleans up all output
+task clean clean-out, clean-data, {
+
+}
+
+# Synopsis: Cleans up output directory
+task clean-out {
+    Remove-Item -Recurse -Force ./out -ErrorAction Ignore
+}
+
+# Synopsis: Cleans up data directory
+task clean-data {
+    Remove-Item -Recurse -Force ./data -ErrorAction Ignore
 }

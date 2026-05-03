@@ -11,6 +11,9 @@ IMAGE_TAG_LATEST = $(IMAGE_NAME):latest
 
 IMAGE_PLATFORMS ?= linux/amd64,linux/arm64,linux/ppc64le,linux/s390x
 
+out/tracker-web: cmd/tracker-web/* internal/*/* internal/*/*/*
+	CGO_ENABLED=0 go build -o $@ -ldflags "-X main.version=${VERSION_STRING}" ./cmd/tracker-web
+
 .PHONY: test
 test: test-domain test-repo-sqlite test-auth-cookie test-rest-api
 
@@ -29,3 +32,14 @@ test-auth-cookie:
 .PHONY: test-rest-api
 test-rest-api:
 	go test -v ./internal/api/rest
+
+.PHONY: clean
+clean: clean-out clean-data
+
+.PHONY: clean-out
+clean-out:
+	rm -rf out
+
+.PHONY: clean-data
+clean-data:
+	rm -rf data
