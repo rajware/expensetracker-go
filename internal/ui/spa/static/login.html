@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expense Tracker — Sign In</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div class="auth-wrap">
+        <div class="auth-card">
+            <div class="auth-title">Expense Tracker</div>
+            <div class="auth-subtitle">Track what you spend, simply.</div>
+
+            <div class="auth-tabs" role="tablist">
+                <button class="auth-tab active" id="tab-login" onclick="switchTab('login')" role="tab">Sign In</button>
+                <button class="auth-tab" id="tab-signup" onclick="switchTab('signup')" role="tab">Sign Up</button>
+            </div>
+
+            <div id="auth-alert" class="alert"></div>
+
+            <!-- Login form -->
+            <form id="form-login" onsubmit="doLogin(event)" novalidate>
+                <div class="form-group">
+                    <label class="form-label" for="login-username">Username</label>
+                    <input class="form-input" type="text" id="login-username" name="username" autocomplete="username"
+                        required autofocus placeholder="your username">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="login-password">Password</label>
+                    <input class="form-input" type="password" id="login-password" name="password"
+                        autocomplete="current-password" required placeholder="••••••••">
+                </div>
+                <div class="mt-12">
+                    <button class="btn btn-primary btn-full" type="submit" id="btn-login">Sign In</button>
+                </div>
+            </form>
+
+            <!-- Signup form -->
+            <form id="form-signup" onsubmit="doSignup(event)" novalidate style="display:none">
+                <div class="form-group">
+                    <label class="form-label" for="signup-username">Username</label>
+                    <input class="form-input" type="text" id="signup-username" name="username" autocomplete="username"
+                        required placeholder="choose a username">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="signup-password">Password</label>
+                    <input class="form-input" type="password" id="signup-password" name="password"
+                        autocomplete="new-password" required placeholder="choose a password">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="signup-password2">Confirm Password</label>
+                    <input class="form-input" type="password" id="signup-password2" name="password2"
+                        autocomplete="new-password" required placeholder="repeat password">
+                </div>
+                <div class="mt-12">
+                    <button class="btn btn-primary btn-full" type="submit" id="btn-signup">Create Account</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/api.js"></script>
+    <script>
+        function switchTab(tab) {
+            const isLogin = tab === 'login';
+            document.getElementById('tab-login').classList.toggle('active', isLogin);
+            document.getElementById('tab-signup').classList.toggle('active', !isLogin);
+            document.getElementById('form-login').style.display = isLogin ? '' : 'none';
+            document.getElementById('form-signup').style.display = isLogin ? 'none' : '';
+            clearAlert();
+            const focusId = isLogin ? 'login-username' : 'signup-username';
+            setTimeout(() => document.getElementById(focusId).focus(), 0);
+        }
+
+        function showAlert(msg, type = 'error') {
+            const el = document.getElementById('auth-alert');
+            el.className = `alert alert-${type} is-visible`;
+            el.textContent = msg;
+        }
+
+        function clearAlert() {
+            const el = document.getElementById('auth-alert');
+            el.className = 'alert';
+            el.textContent = '';
+        }
+
+        async function doLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-login');
+            const username = document.getElementById('login-username').value.trim();
+            const password = document.getElementById('login-password').value;
+            if (!username || !password) { showAlert('Please enter username and password.'); return; }
+
+            btn.disabled = true;
+            btn.textContent = 'Signing in…';
+            try {
+                const res = await Api.login(username, password);
+                if (res && res.ok) {
+                    clearAlert();
+                    window.location.href = CONFIG.APP_BASE + '/';
+                } else {
+                    const msg = await Api.handleError(res, 'Invalid username or password.');
+                    showAlert(msg);
+                }
+            } catch {
+                showAlert('Could not reach the server. Please check your connection.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
+            }
+        }
+
+        async function doSignup(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-signup');
+            const username = document.getElementById('signup-username').value.trim();
+            const password = document.getElementById('signup-password').value;
+            const password2 = document.getElementById('signup-password2').value;
+
+            if (!username || !password) { showAlert('Please fill in all fields.'); return; }
+            if (password !== password2) { showAlert('Passwords do not match.'); return; }
+
+            btn.disabled = true;
+            btn.textContent = 'Creating account…';
+            try {
+                const res = await Api.signup(username, password);
+                if (res && res.ok) {
+                    clearAlert();
+                    window.location.href = CONFIG.APP_BASE + '/';
+                } else if (res && res.status === 409) {
+                    showAlert('That username is already taken.');
+                } else {
+                    const msg = await Api.handleError(res, 'Could not create account.');
+                    showAlert(msg);
+                }
+            } catch {
+                showAlert('Could not reach the server. Please check your connection.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Account';
+            }
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expense Tracker</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <nav id="main-nav"></nav>
+    <main id="page-content" role="main"></main>
+
+    <!-- Scripts: config and api first, then nav, then page modules -->
+    <script src="js/config.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/dashboard.js"></script>
+    <script src="js/profile.js"></script>
+    <script src="js/nav.js"></script>
+
+    <script>
+        // Page loader registry — each module registers itself here
+        const PageLoaders = {
+            dashboard: (el) => Dashboard.load(el),
+            profile: (el) => Profile.load(el),
+        };
+
+        // Boot
+        (async () => {
+            await Nav.init('dashboard');
+            navigate('dashboard');
+        })();
+    </script>
+</body>
+
+</html>

@@ -15,6 +15,7 @@ import (
 	"github.com/rajware/expensetracker-go/internal/auth/cookie"
 	"github.com/rajware/expensetracker-go/internal/domain"
 	"github.com/rajware/expensetracker-go/internal/repository/sqlite"
+	"github.com/rajware/expensetracker-go/internal/ui/spa"
 	"github.com/rajware/expensetracker-go/internal/webserver"
 )
 
@@ -84,9 +85,11 @@ func main() {
 
 	cookieAuth := cookie.New([]byte(hmacKey), 2*time.Minute, false)
 	restHandler := rest.NewHandler(userService, expenseService, cookieAuth, cookieAuth)
+	spaHandler := spa.NewHandler()
 
 	ws := webserver.New(title, &webserver.Options{ListenAddress: addr})
 	ws.HandlerMux().Handle("/api/", http.StripPrefix("/api", restHandler))
+	ws.HandlerMux().Handle("/", spaHandler)
 
 	ws.ListenAndServe()
 }

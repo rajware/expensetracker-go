@@ -11,7 +11,7 @@ IMAGE_TAG_LATEST = $(IMAGE_NAME):latest
 
 IMAGE_PLATFORMS ?= linux/amd64,linux/arm64,linux/ppc64le,linux/s390x
 
-out/tracker-web: cmd/tracker-web/* internal/*/* internal/*/*/*
+out/tracker-web: cmd/tracker-web/* internal/*/* internal/*/*/* internal/ui/spa/static/* internal/ui/spa/static/*/*
 	CGO_ENABLED=0 go build -o $@ -ldflags "-X main.version=${VERSION_STRING}" ./cmd/tracker-web
 
 .PHONY: test
