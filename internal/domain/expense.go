@@ -20,12 +20,22 @@ type Expense struct {
 // ExpenseView is the "display" representation of an Expense.
 // Currently identical, but may diverge in the future.
 type ExpenseView struct {
-	Expense
+	ID          string    `json:"id"`
+	OwnerID     string    `json:"owner_id"`
+	OccurredAt  time.Time `json:"occurred_at"`
+	Description string    `json:"description"`
+	Amount      float64   `json:"amount"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func NewExpenseView(expense Expense) ExpenseView {
 	return ExpenseView{
-		Expense: expense,
+		ID:          expense.ID,
+		OwnerID:     expense.OwnerID,
+		OccurredAt:  expense.OccurredAt,
+		Description: expense.Description,
+		Amount:      expense.Amount,
+		CreatedAt:   expense.CreatedAt,
 	}
 }
 
@@ -60,8 +70,8 @@ type ExpenseQuery struct {
 // which allows callers to calculate the total number of pages without
 // running a second query.
 type ExpenseResult struct {
-	Expenses   []ExpenseView
-	TotalCount int // total matching expenses, ignoring pagination
+	Expenses   []ExpenseView `json:"expenses"`
+	TotalCount int           `json:"total_count"` // total matching expenses, ignoring pagination
 }
 
 // ExpenseRepository is the storage contract for Expense entities.
