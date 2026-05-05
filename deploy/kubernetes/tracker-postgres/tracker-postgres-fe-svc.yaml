@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracker-postgres-fe-svc
+  labels:
+    app.kubernetes.io/name: expensetracker
+    rajware.net/variation: postgres
+spec:
+  type: NodePort  # Change to ClusterIP if the cluster has an Ingress controller, or LoadBalancer
+  selector:
+    app.kubernetes.io/name: expensetracker
+    rajware.net/variation: postgres
+    app.kubernetes.io/component: frontend
+  ports:
+    - name: tracker
+      port: 80
+      targetPort: 8080
+      nodePort: 31000 # Remove if the cluster has an Ingress controller

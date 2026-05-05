@@ -1,0 +1,19 @@
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: tracker-sqlite-ingress
+#   labels:
+#     app.kubernetes.io/name: expensetracker
+#     rajware.net/variation: sqlite
+# spec:
+#   rules:
+#   - host: tracker-sqlite.custom.rwsl.in # Replace with your custom hostname
+#     http:
+#       paths:
+#       - path: /
+#         pathType: Prefix
+#         backend:
+#           service:
+#             name: tracker-sqlite-svc
+#             port:
+#               number: 80

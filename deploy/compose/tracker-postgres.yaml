@@ -1,0 +1,38 @@
+networks:
+  tracker-net:
+
+volumes:
+  tracker-data:
+
+services:
+  tracker-postgres:
+    image: postgres:18.3-alpine3.23
+    volumes:
+      - tracker-data:/var/lib/postgresql
+    networks:
+      - tracker-net
+    environment:
+      - POSTGRES_USER=expenseuser
+      - POSTGRES_PASSWORD=expensepassword
+      - POSTGRES_DB=expensedb
+
+  tracker-web:
+    image: quay.io/rajware/expensetracker-go:latest
+    volumes:
+      - tracker-data:/app/data
+    networks:
+      - tracker-net
+    ports:
+      - "18080:8080"
+    environment:
+      - ET_HMAC_KEY=puxx
+      - ET_DB_DRIVER=postgres
+      - ET_DB_URL=postgres://expenseuser:expensepassword@tracker-postgres/expensedb
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    user: "${RANDOM_UID:-1000660000}:0"
+    tmpfs:
+      - /tmp
+    restart: unless-stopped

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tracker-postgres-fe-dep
+  labels:
+    app.kubernetes.io/name: expensetracker
+    rajware.net/variation: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: expensetracker
+      rajware.net/variation: postgres
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: expensetracker
+        rajware.net/variation: postgres
+        app.kubernetes.io/component: frontend
+    spec:
+      containers:
+        - name: fe
+          image: quay.io/rajware/expensetracker-go:latest
+          env:
+            - name: ET_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tracker-postgres-secret
+                  key: hmacKey
+            - name: ET_DB_DRIVER
+              value: postgres
+            - name: ET_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tracker-postgres-secret
+                  key: dbUrl
+          readinessProbe:
+            httpGet:
+              port: 8080
+              path: /healthz/ready
+            initialDelaySeconds: 10
+            periodSeconds: 10

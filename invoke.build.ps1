@@ -1,10 +1,11 @@
 Param(
-    $VersionMajor   = (property VERSION_MAJOR "1"),
-    $VersionMinor   = (property VERSION_MINOR "0"),
-    $BuildNumber    = (property BUILD_NUMBER  "0"),
-    $PatchString    = (property PATCH_NUMBER  "-alpha1"),
-    $RegistryUser   = (property REGISTRY_USER "quay.io/rajware"),
-    $ImagePlatforms = (property IMAGE_PLATFORMS "linux/amd64,linux/arm64,linux/ppc64le,linux/s390x")
+    $VersionMajor = (property VERSION_MAJOR "1"),
+    $VersionMinor = (property VERSION_MINOR "0"),
+    $BuildNumber = (property BUILD_NUMBER  "0"),
+    $PatchString = (property PATCH_NUMBER  "-alpha1"),
+    $RegistryUser = (property REGISTRY_USER "quay.io/rajware"),
+    $ImagePlatforms = (property IMAGE_PLATFORMS "linux/amd64,linux/arm64,linux/ppc64le,linux/s390x"),
+    $AddLatestTag = $true
 )
 
 $VersionString = "$($VersionMajor).$($VersionMinor).$($BuildNumber)$($PatchString)"
@@ -17,7 +18,7 @@ $ComposePostgresTest = "deploy/compose/postgrestest.yaml"
 # Synopsis: Builds the tracker-web executable
 task out-tracker-web -Outputs out/tracker-web -Inputs (Get-ChildItem -Recurse -File ./cmd/tracker-web, ./internal/) {
     exec {
-        $env:CGO_ENABLED=0
+        $env:CGO_ENABLED = 0
         go build -o $($Outputs) -ldflags "-X main.version=$($VersionString)" ./cmd/tracker-web
     }
 }
@@ -83,6 +84,40 @@ task compose-down-volumes-postgrestest {
     }
 }
 
+# Synopsis: Builds local docker image
+task local-image {
+    exec {
+        docker buildx build --load `
+            -f package/docker/Dockerfile `
+            --build-arg VERSION_STRING=$($VersionString) `
+            -t $($ImageTagLatest) `
+            .
+    }
+}
+
+# Synopsis: Builds and pushes final multi-arch docker image
+task final-image {
+    exec {
+        docker buildx build --push `
+            --platform $($ImagePlatforms) `
+            -f package/docker/Dockerfile `
+            --build-arg VERSION_STRING=$($VersionString) `
+            -t $($ImageTag) `
+            .
+    }
+
+    If ($AddLatestTag) {
+        exec {
+            docker buildx build --push `
+                --platform $($ImagePlatforms) `
+                -f package/docker/Dockerfile `
+                --build-arg VERSION_STRING=$($VersionString) `
+                -t $($ImageTagLatest) `
+                .
+        }
+    }
+}
+
 # Synopsis: Cleans up all output
 task clean clean-out, clean-data, {
 
@@ -96,4 +131,11 @@ task clean-out {
 # Synopsis: Cleans up data directory
 task clean-data {
     Remove-Item -Recurse -Force ./data -ErrorAction Ignore
+}
+
+# Synopsis: Cleans up local docker image
+task clean-local-image {
+    exec {
+        docker image rm $($ImageTagLatest)
+    }
 }

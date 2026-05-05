@@ -8,6 +8,7 @@ REGISTRY_USER ?= quay.io/rajware
 IMAGE_NAME = $(REGISTRY_USER)/expensetracker-go
 IMAGE_TAG = $(IMAGE_NAME):$(VERSION_STRING)
 IMAGE_TAG_LATEST = $(IMAGE_NAME):latest
+TAG_LATEST ?= -t $(IMAGE_TAG_LATEST)
 
 IMAGE_PLATFORMS ?= linux/amd64,linux/arm64,linux/ppc64le,linux/s390x
 
@@ -15,6 +16,8 @@ COMPOSE_POSTGRESTEST = deploy/compose/postgrestest.yaml
 
 out/tracker-web: cmd/tracker-web/* internal/*/* internal/*/*/* internal/ui/spa/static/* internal/ui/spa/static/*/*
 	CGO_ENABLED=0 go build -o $@ -ldflags "-X main.version=${VERSION_STRING}" ./cmd/tracker-web
+
+# Tests
 
 .PHONY: test
 test: test-domain test-auth-cookie test-rest-api test-repo-sqlite test-repo-postgres
@@ -39,6 +42,8 @@ test-rest-api:
 test-repo-postgres: compose-up-postgrestest
 	go test -v ./internal/repository/postgres
 
+# Docker Compose
+
 .PHONY: compose-up-postgrestest
 compose-up-postgrestest:
 	docker compose -p test -f $(COMPOSE_POSTGRESTEST) up -d
@@ -51,6 +56,27 @@ compose-down-postgrestest:
 compose-down-volumes-postgrestest:
 	docker compose -p test -f $(COMPOSE_POSTGRESTEST) down --volumes
 
+# Docker
+
+.PHONY: local-image
+local-image:
+	docker buildx build --load \
+	                    -f package/docker/Dockerfile \
+						--build-arg VERSION_STRING=${VERSION_STRING} \
+						-t $(IMAGE_TAG_LATEST) \
+						.
+
+.PHONY: final-image
+final-image:
+	docker buildx build --push \
+						--platform $(IMAGE_PLATFORMS) \
+						-f package/docker/Dockerfile \
+						--build-arg VERSION_STRING=${VERSION_STRING} \
+						-t $(IMAGE_TAG) \
+						$(TAG_LATEST) \
+						.
+# Clean
+
 .PHONY: clean
 clean: clean-out clean-data
 
@@ -61,3 +87,7 @@ clean-out:
 .PHONY: clean-data
 clean-data:
 	rm -rf data
+
+.PHONY: clean-local-image
+clean-local-image:
+	docker image rm $(IMAGE_TAG_LATEST)

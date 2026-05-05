@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tracker-postgres-db-dep
+  labels:
+    app.kubernetes.io/name: expensetracker
+    rajware.net/variation: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: expensetracker
+      rajware.net/variation: postgres
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: expensetracker
+        rajware.net/variation: postgres
+        app.kubernetes.io/component: backend
+    spec:
+      volumes:
+        - name: tracker-db
+          persistentVolumeClaim:
+            claimName: tracker-postgres-pvc
+      containers:
+        - name: db
+          image: docker.io/library/postgres:18-alpine
+          volumeMounts:
+            - name: tracker-db
+              mountPath: /var/lib/postgresql
+          env:
+            - name: POSTGRES_USER
+              value: trackeruser
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tracker-postgres-secret
+                  key: dbPassword
+            - name: POSTGRES_DB
+              value: expensetrackerdb
