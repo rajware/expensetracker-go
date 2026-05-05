@@ -90,6 +90,23 @@ func (h *handler) handleKeepalive(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *handler) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	userID := userIDFromContext(r.Context())
+	if err := h.users.ChangePassword(r.Context(), userID, body.OldPassword, body.NewPassword); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *handler) handleSignOut(w http.ResponseWriter, r *http.Request) {
 	h.transport.ClearToken(w)
 	w.WriteHeader(http.StatusNoContent)

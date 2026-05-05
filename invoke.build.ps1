@@ -23,7 +23,7 @@ task out-tracker-web -Outputs out/tracker-web -Inputs (Get-ChildItem -Recurse -F
 }
 
 # Synopsis: Runs all tests
-task test test-domain, test-repository-sqlite, test-auth-cookie, test-rest-api, {
+task test test-domain, test-auth-cookie, test-rest-api, test-repo-sqlite, test-repo-postgres, {
 
 }
 
@@ -35,7 +35,7 @@ task test-domain {
 }
 
 # Synopsis: Runs tests for repository/sqlite package
-task test-repository-sqlite {
+task test-repo-sqlite {
     exec {
         go test -v ./internal/repository/sqlite
     }

@@ -75,6 +75,24 @@ func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
+func (r *UserRepository) UpdatePassword(ctx context.Context, id, hash string) error {
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE users SET password_hash = $1 WHERE id = $2`,
+		hash, id,
+	)
+	if err != nil {
+		return fmt.Errorf("UserRepository.UpdatePassword: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("UserRepository.UpdatePassword rows affected: %w", err)
+	}
+	if rows == 0 {
+		return domain.ErrUserNotFound
+	}
+	return nil
+}
+
 // Delete removes the user. Because the expenses table has
 // ON DELETE CASCADE, all expenses owned by this user are removed automatically.
 func (r *UserRepository) Delete(ctx context.Context, id string) error {

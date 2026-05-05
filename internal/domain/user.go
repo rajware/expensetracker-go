@@ -36,6 +36,7 @@ func NewUserView(user *User) UserView {
 type UserRepository interface {
 	Create(ctx context.Context, u *User) error
 	Update(ctx context.Context, u *User) error
+	UpdatePassword(ctx context.Context, id, hash string) error
 	// Delete needs to ensure that all data owned by this user is also
 	// deleted.
 	Delete(ctx context.Context, id string) error
@@ -135,4 +136,28 @@ func (s UserService) UpdateDisplayName(ctx context.Context, id string, newDispla
 // doc comment for how storage backends are expected to fulfil that contract.
 func (s UserService) CloseAccountByID(ctx context.Context, id string) error {
 	return s.users.Delete(ctx, id)
+}
+
+// ChangePassword updates the password for the user with the given ID.
+// It verifies the current password before applying the change.
+func (s UserService) ChangePassword(ctx context.Context, id, oldPassword, newPassword string) error {
+	user, err := s.users.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
+		return ErrInvalidCredentials
+	}
+
+	if len(newPassword) < 8 {
+		return ErrPasswordTooShort
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	return s.users.UpdatePassword(ctx, id, string(hash))
 }

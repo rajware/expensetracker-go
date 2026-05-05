@@ -107,6 +107,21 @@ func (r *MockUserRepository) Update(ctx context.Context, user *domain.User) erro
 	return nil
 }
 
+// UpdatePassword updates the user's password hash
+func (r *MockUserRepository) UpdatePassword(ctx context.Context, id, hash string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	storedUser, ok := r.users[id]
+	if !ok {
+		return domain.ErrUserNotFound
+	}
+
+	storedUser.PasswordHash = hash
+
+	return nil
+}
+
 // ---
 
 // MockExpenseRepository is a thread-safe, in-memory ExpenseRepository.

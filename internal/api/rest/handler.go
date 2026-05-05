@@ -42,6 +42,7 @@ func NewHandler(
 	}
 	mux.Handle("GET /users/me", protected(h.handleGetMe))
 	mux.Handle("PATCH /users/me", protected(h.handleUpdateMe))
+	mux.Handle("POST /users/me/password", protected(h.handleUpdatePassword))
 	mux.Handle("DELETE /users/me", protected(h.handleDeleteMe))
 	mux.Handle("POST /users/me/keepalive", protected(h.handleKeepalive))
 	mux.Handle("POST /users/me/signout", protected(h.handleSignOut))

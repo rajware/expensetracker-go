@@ -11,7 +11,9 @@ const Api = (() => {
         }
         const res = await fetch(CONFIG.API_BASE + path, opts);
         if (res.status === 401 && 
-            !(path.startsWith('/api/users/signup') || path.startsWith('/api/users/signin'))
+            !(path.startsWith('/api/users/signup') || 
+              path.startsWith('/api/users/signin') ||
+              path.startsWith('/api/users/me/password'))
             ) {
             window.location.href = CONFIG.APP_BASE + '/index.html';
             return null;
@@ -55,6 +57,12 @@ const Api = (() => {
     const updateMe = (display_name) =>
         patch('/api/users/me', { display_name });
 
+    const updatePassword = (old_password, new_password) =>
+        post('/api/users/me/password', { old_password, new_password });
+
+    const closeAccount = () =>
+        del('/api/users/me');
+
     // Expenses
     const getExpenses = (params = {}) => {
         const qs = new URLSearchParams();
@@ -77,7 +85,7 @@ const Api = (() => {
         get, post, put, del,
         handleError,
         signup, login, logout, touchSession,
-        getMe, updateMe,
+        getMe, updateMe, updatePassword, closeAccount,
         getExpenses, createExpense, updateExpense, deleteExpense,
     };
 })();

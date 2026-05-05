@@ -17,7 +17,7 @@ out/tracker-web: cmd/tracker-web/* internal/*/* internal/*/*/* internal/ui/spa/s
 	CGO_ENABLED=0 go build -o $@ -ldflags "-X main.version=${VERSION_STRING}" ./cmd/tracker-web
 
 .PHONY: test
-test: test-domain test-repo-sqlite test-auth-cookie test-rest-api
+test: test-domain test-auth-cookie test-rest-api test-repo-sqlite test-repo-postgres
 
 .PHONY: test-domain
 test-domain:

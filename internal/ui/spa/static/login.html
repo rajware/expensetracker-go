@@ -129,8 +129,14 @@
             try {
                 const res = await Api.signup(username, password);
                 if (res && res.ok) {
-                    clearAlert();
-                    window.location.href = CONFIG.APP_BASE + '/';
+                    // Clear the signup form
+                    document.getElementById('signup-username').value = '';
+                    document.getElementById('signup-password').value = '';
+                    document.getElementById('signup-password2').value = '';
+                    
+                    // Switch to login tab and show success message
+                    switchTab('login');
+                    showAlert('Account created! You can now sign in with your new credentials.', 'success');
                 } else if (res && res.status === 409) {
                     showAlert('That username is already taken.');
                 } else {

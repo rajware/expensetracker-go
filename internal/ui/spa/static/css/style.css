@@ -679,15 +679,33 @@ a:hover {
 }
 
 /* ── Card (profile / generic) ── */
+.card-container {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    max-width: 900px;
+}
+
+.profile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 24px;
+}
+
 .card {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    padding: 16px;
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
 }
 
-.card+.card {
-    margin-top: 12px;
+.card-danger {
+    border: 1px solid #fee2e2;
+}
+
+.card-danger .card-title {
+    color: #991b1b;
 }
 
 /* ── Badge ── */
