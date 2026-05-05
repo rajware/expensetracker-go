@@ -374,6 +374,51 @@ paths:
         "500":
           $ref: '#/components/responses/InternalError'
 
+  /users/me/password:
+    post:
+      summary: Update the authenticated user's password
+      operationId: updatePassword
+      tags: [Users]
+      security:
+        - cookieAuth: []
+      description: |
+        Changes the password for the authenticated user.
+        The old password must be correct, and the new password must be
+        at least 8 characters long.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                old_password:
+                  type: string
+                  description: The current password.
+                  example: "old-password-123"
+                new_password:
+                  type: string
+                  description: The new password. Must be at least 8 characters.
+                  example: "new-secure-password-456"
+              required: [old_password, new_password]
+      responses:
+        "204":
+          description: Password updated successfully.
+        "401":
+          description: Incorrect old password.
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "422":
+          description: New password is too short.
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
   /users/me/signout:
     post:
       summary: Sign out and clear the auth token
