@@ -12,6 +12,8 @@ $ImageName = "$($RegistryUser)/expensetracker-go"
 $ImageTag = "$($ImageName):$($VersionString)"
 $ImageTagLatest = "$($ImageName):latest"
 
+$ComposePostgresTest = "deploy/compose/postgrestest.yaml"
+
 # Synopsis: Builds the tracker-web executable
 task out-tracker-web -Outputs out/tracker-web -Inputs (Get-ChildItem -Recurse -File ./cmd/tracker-web, ./internal/) {
     exec {
@@ -50,6 +52,34 @@ task test-auth-cookie {
 task test-rest-api {
     exec {
         go test -v ./internal/api/rest
+    }
+}
+
+# Synopsis: Runs tests for repository/postgres package
+task test-repo-postgres compose-up-postgrestest, {
+    exec {
+        go test -v ./internal/repository/postgres
+    }
+}
+
+# Synopsis: Brings up postgres on port 15432
+task compose-up-postgrestest {
+    exec {
+        docker compose -p test -f $($ComposePostgresTest) up -d
+    }
+}
+
+# Synopsis: Brings down postgres on port 15432
+task compose-down-postgrestest {
+    exec {
+        docker compose -p test -f $($ComposePostgresTest) down
+    }
+}
+
+# Synopsis: Brings down postgres on port 15432, deletes volumes
+task compose-down-volumes-postgrestest {
+    exec {
+        docker compose -p test -f $($ComposePostgresTest) down --volumes
     }
 }
 

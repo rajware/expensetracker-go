@@ -11,6 +11,8 @@ IMAGE_TAG_LATEST = $(IMAGE_NAME):latest
 
 IMAGE_PLATFORMS ?= linux/amd64,linux/arm64,linux/ppc64le,linux/s390x
 
+COMPOSE_POSTGRESTEST = deploy/compose/postgrestest.yaml
+
 out/tracker-web: cmd/tracker-web/* internal/*/* internal/*/*/* internal/ui/spa/static/* internal/ui/spa/static/*/*
 	CGO_ENABLED=0 go build -o $@ -ldflags "-X main.version=${VERSION_STRING}" ./cmd/tracker-web
 
@@ -32,6 +34,22 @@ test-auth-cookie:
 .PHONY: test-rest-api
 test-rest-api:
 	go test -v ./internal/api/rest
+
+.PHONY: test-repo-postgres
+test-repo-postgres: compose-up-postgrestest
+	go test -v ./internal/repository/postgres
+
+.PHONY: compose-up-postgrestest
+compose-up-postgrestest:
+	docker compose -p test -f $(COMPOSE_POSTGRESTEST) up -d
+
+.PHONY: compose-down-postgrestest
+compose-down-postgrestest:
+	docker compose -p test -f $(COMPOSE_POSTGRESTEST) down
+
+.PHONY: compose-down-volumes-postgrestest
+compose-down-volumes-postgrestest:
+	docker compose -p test -f $(COMPOSE_POSTGRESTEST) down --volumes
 
 .PHONY: clean
 clean: clean-out clean-data

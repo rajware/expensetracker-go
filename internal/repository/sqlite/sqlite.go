@@ -12,6 +12,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -76,6 +77,13 @@ func (s *Store) UserRepository() *UserRepository {
 // ExpenseRepository returns an ExpenseRepository backed by this store.
 func (s *Store) ExpenseRepository() *ExpenseRepository {
 	return &ExpenseRepository{db: s.db}
+}
+
+// Ready implements healthroutes.Checker. It pings the database to confirm
+// connectivity. For SQLite, Open already applies all migrations synchronously,
+// so a successful ping means the store is fully ready.
+func (s *Store) Ready(ctx context.Context) error {
+	return s.db.PingContext(ctx)
 }
 
 // init creates the schema if it does not already exist.
