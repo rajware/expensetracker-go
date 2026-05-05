@@ -3,6 +3,9 @@ const Dashboard = (() => {
     let _sortCol = 'date';
     let _sortDir = 'asc';
     let _container = null;
+    let _currentPage = 1;
+    let _pageSize = CONFIG.PAGE_SIZE || 25;
+    let _totalCount = 0;
 
     // ── Helpers ────────────────────────────────────────────────
     const _esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -23,53 +26,78 @@ const Dashboard = (() => {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
     };
 
-    // ── Load ───────────────────────────────────────────────────
     const load = async (container) => {
         _container = container;
         container.innerHTML = `<div style="padding:20px;color:var(--color-text-muted)"><span class="spinner"></span> Loading…</div>`;
 
-        const expRes = await Api.getExpenses({ from: _firstOfMonth(), to: _today() });
-
-        if (expRes && expRes.ok) _expenses = (await expRes.json()).expenses || [];
-        else _expenses = [];
+        await _fetchData();
 
         _render();
+    };
+
+    const _fetchData = async () => {
+        const from = document.getElementById('flt-from')?.value || _firstOfMonth();
+        const to = document.getElementById('flt-to')?.value || _today();
+
+        const params = {
+            from, to,
+            page: _currentPage,
+            page_size: _pageSize,
+            sort_by: _sortCol === 'date' ? 'occurred_at' : _sortCol,
+            sort_desc: _sortDir === 'desc'
+        };
+
+        const res = await Api.getExpenses(params);
+        if (res && res.ok) {
+            const data = await res.json();
+            _expenses = data.expenses || [];
+            _totalCount = data.total_count || 0;
+        } else {
+            _expenses = [];
+            _totalCount = 0;
+        }
     };
 
     // ── Main render ────────────────────────────────────────────
     const _render = () => {
         if (!_container) return;
         _container.innerHTML = `
-            <div class="page-header">
-                <span class="page-title">Dashboard</span>
-                <button class="btn btn-primary btn-sm" onclick="Dashboard._openExpenseModal(null)">+ Add Expense</button>
-            </div>
+            <div class="dashboard-layout">
+                <div class="page-header">
+                    <span class="page-title">Dashboard</span>
+                    <button class="btn btn-primary btn-sm" onclick="Dashboard._openExpenseModal(null)">+ Add Expense</button>
+                </div>
 
-            <div class="toolbar" id="dash-toolbar">
-                <span class="toolbar-label">From</span>
-                <input class="form-input toolbar-date" type="date" id="flt-from"
-                       value="${_firstOfMonth()}" onchange="Dashboard._applyFilters()">
-                <span class="toolbar-label">To</span>
-                <input class="form-input toolbar-date" type="date" id="flt-to"
-                       value="${_today()}" onchange="Dashboard._applyFilters()">
-                <div class="toolbar-sep"></div>
-                <button class="btn btn-secondary btn-sm" onclick="Dashboard._clearFilters()">Clear</button>
-            </div>
+                <div class="toolbar" id="dash-toolbar">
+                    <span class="toolbar-label">From</span>
+                    <input class="form-input toolbar-date" type="date" id="flt-from"
+                           value="${_firstOfMonth()}" onchange="Dashboard._applyFilters()">
+                    <span class="toolbar-label">To</span>
+                    <input class="form-input toolbar-date" type="date" id="flt-to"
+                           value="${_today()}" onchange="Dashboard._applyFilters()">
+                    <div class="toolbar-sep"></div>
+                    <button class="btn btn-secondary btn-sm" onclick="Dashboard._clearFilters()">Clear</button>
+                </div>
 
-            <div class="table-wrap">
-                <table class="data-table" id="expense-table">
-                    <thead>
-                        <tr>
-                            <th onclick="Dashboard._sort('occurred_at')" class="${_sortClass('date')}">Date</th>
-                            <th onclick="Dashboard._sort('description')" class="${_sortClass('description')}">Description</th>
-                            <th onclick="Dashboard._sort('amount')"      class="${_sortClass('amount')} col-amount">Amount</th>
-                            <th class="col-actions"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="expense-tbody">
-                        ${_renderRows()}
-                    </tbody>
-                </table>
+                <div class="table-wrap">
+                    <table class="data-table" id="expense-table">
+                        <thead>
+                            <tr>
+                                <th onclick="Dashboard._sort('occurred_at')" class="${_sortClass('occurred_at')}">Date</th>
+                                <th onclick="Dashboard._sort('description')" class="${_sortClass('description')}">Description</th>
+                                <th onclick="Dashboard._sort('amount')"      class="${_sortClass('amount')} col-amount">Amount</th>
+                                <th class="col-actions"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="expense-tbody">
+                            ${_renderRows()}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="pagination-container">
+                    ${_renderPagination()}
+                </div>
             </div>
         `;
     };
@@ -81,9 +109,8 @@ const Dashboard = (() => {
         if (!_expenses.length) {
             return `<tr><td colspan="4" class="table-empty">No expenses found for this period.</td></tr>`;
         }
-        const sorted = _sorted(_expenses);
-        return sorted.map(e => `
-            <tr>
+        return _expenses.map(e => `
+            <tr id="exp-row-${e.id}">
                 <td class="col-date">${_fmtDate(e.occurred_at)}</td>
                 <td>${_esc(e.description || '')}</td>
                 <td class="col-amount">${_fmtAmount(e.amount)}</td>
@@ -97,19 +124,60 @@ const Dashboard = (() => {
         `).join('');
     };
 
+    const _renderPagination = () => {
+        const start = (_currentPage - 1) * _pageSize + 1;
+        const end = Math.min(_currentPage * _pageSize, _totalCount);
+        const hasPrev = _currentPage > 1;
+        const hasNext = end < _totalCount;
+
+        return `
+            <div class="pagination">
+                <div class="pagination-info">
+                    Showing <strong>${start}-${end}</strong> of <strong>${_totalCount}</strong> expenses
+                </div>
+                <div class="pagination-controls">
+                    <button class="btn btn-secondary btn-sm" ${!hasPrev ? 'disabled' : ''} onclick="Dashboard._prevPage()">Previous</button>
+                    <button class="btn btn-secondary btn-sm" ${!hasNext ? 'disabled' : ''} onclick="Dashboard._nextPage()">Next</button>
+                </div>
+            </div>
+        `;
+    };
+
+    const _prevPage = async () => {
+        if (_currentPage > 1) {
+            _currentPage--;
+            await _fetchData();
+            _refreshRows();
+        }
+    };
+
+    const _nextPage = async () => {
+        const maxPage = Math.ceil(_totalCount / _pageSize);
+        if (_currentPage < maxPage) {
+            _currentPage++;
+            await _fetchData();
+            _refreshRows();
+        }
+    };
+
     const _refreshRows = () => {
         const tbody = document.getElementById('expense-tbody');
         if (tbody) tbody.innerHTML = _renderRows();
+        
+        const pagContainer = document.getElementById('pagination-container');
+        if (pagContainer) pagContainer.innerHTML = _renderPagination();
     };
 
     // ── Sort ───────────────────────────────────────────────────
-    const _sort = (col) => {
+    const _sort = async (col) => {
         if (_sortCol === col) {
             _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
         } else {
             _sortCol = col;
             _sortDir = col === 'amount' ? 'desc' : 'asc';
         }
+        _currentPage = 1;
+        await _fetchData();
         _render();
     };
 
@@ -125,22 +193,11 @@ const Dashboard = (() => {
 
     // ── Filters ────────────────────────────────────────────────
     const _applyFilters = async () => {
-        const from = document.getElementById('flt-from').value;
-        const to = document.getElementById('flt-to').value;
-
-        const params = {};
-        if (from) params.from = from;
-        if (to) params.to = to;
-
+        _currentPage = 1; // Reset to page 1 on new filter
         const tbody = document.getElementById('expense-tbody');
         if (tbody) tbody.innerHTML = `<tr class="loading-row"><td colspan="4"><span class="spinner"></span></td></tr>`;
 
-        const res = await Api.getExpenses(params);
-        if (res && res.ok) {
-            _expenses = (await res.json()).expenses || [];
-        } else {
-            _expenses = [];
-        }
+        await _fetchData();
         _refreshRows();
     };
 
@@ -243,14 +300,21 @@ const Dashboard = (() => {
 
         if (res && (res.ok || res.status === 201)) {
             const saved = await res.json();
-            if (id) {
-                const idx = _expenses.findIndex(e => e.id === id);
-                if (idx >= 0) _expenses[idx] = saved; else _expenses.push(saved);
+            if (!id || id === 'null') {
+                // New expense: find where it landed and go there
+                await _navigateToExpense(saved.id);
             } else {
-                _expenses.push(saved);
+                await _fetchData();
             }
             _closeModal();
             _refreshRows();
+            
+            // Subtle highlight
+            const row = document.getElementById(`exp-row-${saved.id}`);
+            if (row) {
+                row.style.background = 'var(--color-accent-bg)';
+                setTimeout(() => row.style.background = '', 2000);
+            }
         } else {
             btn.disabled = false;
             const msg = await Api.handleError(res, 'Could not save expense.');
@@ -287,7 +351,12 @@ const Dashboard = (() => {
     const _deleteExpense = async (id) => {
         const res = await Api.deleteExpense(id);
         if (res && (res.ok || res.status === 204)) {
-            _expenses = _expenses.filter(e => e.id !== id);
+            await _fetchData();
+            // If we deleted the last item on the current page, go back
+            if (_expenses.length === 0 && _currentPage > 1) {
+                _currentPage--;
+                await _fetchData();
+            }
             _closeModal();
             _refreshRows();
         } else {
@@ -296,11 +365,34 @@ const Dashboard = (() => {
         }
     };
 
+    const _navigateToExpense = async (targetId) => {
+        const from = document.getElementById('flt-from')?.value || _firstOfMonth();
+        const to = document.getElementById('flt-to')?.value || _today();
+
+        // Fetch everything (no page size) to find rank
+        const res = await Api.getExpenses({
+            from, to,
+            sort_by: _sortCol === 'date' ? 'occurred_at' : _sortCol,
+            sort_desc: _sortDir === 'desc',
+            page_size: 0 // return all
+        });
+
+        if (res && res.ok) {
+            const data = await res.json();
+            const idx = data.expenses.findIndex(e => e.id === targetId);
+            if (idx >= 0) {
+                _currentPage = Math.floor(idx / _pageSize) + 1;
+                await _fetchData();
+            }
+        }
+    };
+
     return {
         load,
         _sort, _applyFilters, _clearFilters,
         _openExpenseModal, _closeModal, _saveExpense,
         _confirmDelete, _deleteExpense,
+        _prevPage, _nextPage
     };
 })();
 

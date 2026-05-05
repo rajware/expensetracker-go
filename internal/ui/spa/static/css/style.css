@@ -39,6 +39,7 @@ body {
     color: var(--color-text);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    overflow: hidden;
 }
 
 /* ── Typography ── */
@@ -219,7 +220,8 @@ a:hover {
 #page-content {
     margin-top: var(--nav-h);
     padding: 16px;
-    min-height: calc(100vh - var(--nav-h));
+    height: calc(100vh - var(--nav-h));
+    overflow: hidden;
 }
 
 /* ── Auth Page ── */
@@ -491,12 +493,20 @@ a:hover {
     min-width: 120px;
 }
 
+.dashboard-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 16px;
+}
+
 /* ── Table ── */
 .table-wrap {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    overflow: hidden;
+    overflow-y: auto;
+    flex: 1;
 }
 
 .data-table {
@@ -518,6 +528,9 @@ a:hover {
     white-space: nowrap;
     cursor: pointer;
     user-select: none;
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
 .data-table thead th:hover {
@@ -539,9 +552,6 @@ a:hover {
     transition: background 0.1s;
 }
 
-.data-table tbody tr:last-child {
-    border-bottom: none;
-}
 
 .data-table tbody tr:hover {
     background: var(--color-bg);
@@ -706,6 +716,27 @@ a:hover {
 
 .card-danger .card-title {
     color: #991b1b;
+}
+
+/* ── Pagination ── */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    font-size: 0.85rem;
+}
+
+.pagination-info {
+    color: var(--color-text-muted);
+}
+
+.pagination-controls {
+    display: flex;
+    gap: 8px;
 }
 
 /* ── Badge ── */

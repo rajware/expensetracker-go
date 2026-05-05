@@ -5,4 +5,5 @@ const CONFIG = {
 
     // Nav bar appearance — change NAV_BG to any CSS colour value
     NAV_BG: '#1d4ed8',
+    PAGE_SIZE: 10,
 };

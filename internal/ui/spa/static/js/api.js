@@ -68,6 +68,10 @@ const Api = (() => {
         const qs = new URLSearchParams();
         if (params.from) qs.set('from', params.from);
         if (params.to) qs.set('to', params.to);
+        if (params.page) qs.set('page', params.page);
+        if (params.page_size) qs.set('page_size', params.page_size);
+        if (params.sort_by) qs.set('sort_by', params.sort_by);
+        if (params.sort_desc) qs.set('sort_desc', params.sort_desc);
         const q = qs.toString();
         return get('/api/expenses' + (q ? '?' + q : ''));
     };
