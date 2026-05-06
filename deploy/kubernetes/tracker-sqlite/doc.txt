@@ -1,0 +1,12 @@
+# Manifest to deploy Expense Tracker with a SQLite database.
+#
+# Edit the Secret called tracker-sqlite-secret:
+#   hmacKey: a string used to sign the auth cookie.
+#
+# By default, the Service called tracker-sqlite-svc has `type: NodePort`.
+# Change this to `type: ClusterIP` if the cluster has an Ingress controller.
+# Also, remove the spec.ports[].nodePort: 31000` property.
+#
+# Finally, uncomment the Ingress called tracker-sqlite-ingress.
+# Edit the Ingress called tracker-sqlite-ingress:
+#    host: The hostname used to access Expense Tracker

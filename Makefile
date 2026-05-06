@@ -12,13 +12,60 @@ TAG_LATEST ?= -t $(IMAGE_TAG_LATEST)
 
 IMAGE_PLATFORMS ?= linux/amd64,linux/arm64,linux/ppc64le,linux/s390x
 
+SRC_FILES = cmd/tracker-web/* internal/*/* internal/*/*/* internal/ui/spa/static/* internal/ui/spa/static/*/*
+
 COMPOSE_POSTGRESTEST = deploy/compose/postgrestest.yaml
 
-out/tracker-web: cmd/tracker-web/* internal/*/* internal/*/*/* internal/ui/spa/static/* internal/ui/spa/static/*/*
+RELEASE_TARGETS = linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64 windows_arm64
+
+# Macro for dynamically creating target-specific rules
+define RELEASERULE
+out/tracker-web_$O_$A$(if $(filter windows,$O),.exe): $$(SRC_FILES)
+	CGO_ENABLED=0 GOOS=$O GOARCH=$A go build -o $$@ -ldflags "-X main.version=${VERSION_STRING}" ./cmd/tracker-web
+
+.PHONY: $O_$A
+$O_$A: out/tracker-web_$O_$A$(if $(filter windows,$O),.exe)
+endef
+
+# Targets
+# The default target is an executable on the current OS and ARCH.
+# This is used in the Dockerfile
+out/tracker-web: $(SRC_FILES)
 	CGO_ENABLED=0 go build -o $@ -ldflags "-X main.version=${VERSION_STRING}" ./cmd/tracker-web
 
-# Tests
+.PHONY: default
+default: out/tracker-web
 
+# Apply the RELEASERULE macro to each release target. This will
+# create rules like the following:
+#
+# out/tracker-web_linux_amd64: $(SRC_FILES)
+#	CGO_ENABLED=0 GOOS=$O GOARCH=$A go build -o $@ -ldflags "-X main.version=${VERSION_STRING}" ./cmd/tracker-web
+#
+# .PHONY: linux_amd64
+# linux_amd64: out/tracker-web_linux_amd64
+$(foreach target,$(RELEASE_TARGETS), \
+  $(eval O=$(word 1,$(subst _, ,$(target)))) \
+  $(eval A=$(word 2,$(subst _, ,$(target)))) \
+  $(eval $(RELEASERULE)) \
+)
+
+out/tracker-sqlite.k8s.yaml: deploy/kubernetes/tracker-sqlite/*.yaml deploy/kubernetes/tracker-sqlite/doc.txt
+	./scripts/build-k8smanifest.sh "tracker-sqlite" "$(VERSION_STRING)" $@
+
+out/tracker-postgres.k8s.yaml: deploy/kubernetes/tracker-postgres/*.yaml deploy/kubernetes/tracker-postgres/doc.txt
+	./scripts/build-k8smanifest.sh "tracker-postgres" "$(VERSION_STRING)" $@
+
+out/tracker-sqlite.compose.yaml: deploy/compose/tracker-sqlite.yaml
+	./scripts/build-composemanifest.sh "tracker-sqlite" "$(VERSION_STRING)" $@
+
+out/tracker-postgres.compose.yaml: deploy/compose/tracker-postgres.yaml
+	./scripts/build-composemanifest.sh "tracker-postgres" "$(VERSION_STRING)" $@
+
+.PHONY: release
+release: $(RELEASE_TARGETS) out/tracker-sqlite.k8s.yaml out/tracker-postgres.k8s.yaml out/tracker-sqlite.compose.yaml out/tracker-postgres.compose.yaml
+
+# Tests
 .PHONY: test
 test: test-domain test-auth-cookie test-rest-api test-repo-sqlite test-repo-postgres
 
@@ -43,7 +90,6 @@ test-repo-postgres: compose-up-postgrestest
 	go test -v ./internal/repository/postgres
 
 # Docker Compose
-
 .PHONY: compose-up-postgrestest
 compose-up-postgrestest:
 	docker compose -p test -f $(COMPOSE_POSTGRESTEST) up -d
@@ -57,7 +103,6 @@ compose-down-volumes-postgrestest:
 	docker compose -p test -f $(COMPOSE_POSTGRESTEST) down --volumes
 
 # Docker
-
 .PHONY: local-image
 local-image:
 	docker buildx build --load \
@@ -76,7 +121,6 @@ final-image:
 						$(TAG_LATEST) \
 						.
 # Clean
-
 .PHONY: clean
 clean: clean-out clean-data
 
