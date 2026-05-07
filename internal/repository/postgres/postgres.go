@@ -25,6 +25,10 @@ import (
 // sharing the same database server.
 const advisoryLockKey = 8472983645
 
+// currentSchemaVersion is the schema version this binary requires.
+// Ready returns an error if the database schema is older than this.
+const currentSchemaVersion = 1
+
 // Store holds the database connection pool and vends repository implementations.
 type Store struct {
 	db *sql.DB
@@ -67,11 +71,21 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// Ready implements healthroutes.Checker. It pings the database to confirm
-// connectivity. Open already applies all migrations before returning, so a
-// successful ping means the store is fully ready.
+// Ready implements healthroutes.Checker. It pings the database and verifies
+// the schema is at least the version this binary requires.
 func (s *Store) Ready(ctx context.Context) error {
-	return s.db.PingContext(ctx)
+	if err := s.db.PingContext(ctx); err != nil {
+		return err
+	}
+	var version int
+	err := s.db.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&version)
+	if err != nil {
+		return fmt.Errorf("postgres.Ready read schema version: %w", err)
+	}
+	if version < currentSchemaVersion {
+		return fmt.Errorf("postgres.Ready: schema version %d is below required %d", version, currentSchemaVersion)
+	}
+	return nil
 }
 
 // UserRepository returns a UserRepository backed by this store.
@@ -105,7 +119,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}()
 
 	log.Println("Starting schema migration...")
-	if err := applySchema(ctx, conn); err != nil {
+	if err := migrateSchema(ctx, conn); err != nil {
 		return err
 	}
 	log.Println("Schema migration completed successfully.")
@@ -113,11 +127,56 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// applySchema creates the schema if it does not already exist.
+// migrateSchema applies schema migrations sequentially up to currentSchemaVersion.
+// Each step is applied only if the schema version is below that step's number.
+//
+// Step 1 is special: it must handle the case where schema_version does not yet
+// exist (a v1.0.0 database), so it checks for the table before reading it.
+func migrateSchema(ctx context.Context, conn *sql.Conn) error {
+	version, err := readSchemaVersion(ctx, conn)
+	if err != nil {
+		return err
+	}
+
+	if version < 1 {
+		if err := migrateStep1(ctx, conn); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// readSchemaVersion returns the current schema version, or 0 if the
+// schema_version table does not yet exist (a v1.0.0 database).
+func readSchemaVersion(ctx context.Context, conn *sql.Conn) (int, error) {
+	var count int
+	err := conn.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_version'`,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("postgres.migrate check schema_version table: %w", err)
+	}
+	if count == 0 {
+		return 0, nil
+	}
+	var version int
+	if err := conn.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&version); err != nil {
+		return 0, fmt.Errorf("postgres.migrate read schema version: %w", err)
+	}
+	return version, nil
+}
+
+// migrateStep1 creates the schema_version table, the users table, and the
+// expenses table (all idempotent), then records schema version 1.
 // ON DELETE CASCADE handles the user→expense cascade contract defined in
 // domain.UserRepository.Delete.
-func applySchema(ctx context.Context, conn *sql.Conn) error {
+func migrateStep1(ctx context.Context, conn *sql.Conn) error {
 	_, err := conn.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS schema_version (
+			version INTEGER NOT NULL
+		);
+
 		CREATE TABLE IF NOT EXISTS users (
 			id            TEXT PRIMARY KEY,
 			username      TEXT NOT NULL UNIQUE,
@@ -133,9 +192,12 @@ func applySchema(ctx context.Context, conn *sql.Conn) error {
 			amount      DOUBLE PRECISION NOT NULL,
 			created_at  TIMESTAMPTZ NOT NULL
 		);
+
+		DELETE FROM schema_version;
+		INSERT INTO schema_version (version) VALUES (1);
 	`)
 	if err != nil {
-		return fmt.Errorf("postgres.migrate apply schema: %w", err)
+		return fmt.Errorf("postgres.migrate step 1: %w", err)
 	}
 	return nil
 }

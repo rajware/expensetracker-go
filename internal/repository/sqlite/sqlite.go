@@ -24,6 +24,10 @@ import (
 
 const defaultPath = "./data/expense_tracker.db"
 
+// currentSchemaVersion is the schema version this binary requires.
+// Ready returns an error if the database schema is older than this.
+const currentSchemaVersion = 1
+
 // Store holds the database connection and vends repository implementations.
 type Store struct {
 	db *sql.DB
@@ -56,7 +60,7 @@ func Open(path string) (*Store, error) {
 	log.Println("SQLite database opened.")
 
 	store := &Store{db: db}
-	if err := store.init(); err != nil {
+	if err := store.migrate(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -79,28 +83,84 @@ func (s *Store) ExpenseRepository() *ExpenseRepository {
 	return &ExpenseRepository{db: s.db}
 }
 
-// Ready implements healthroutes.Checker. It pings the database to confirm
-// connectivity. For SQLite, Open already applies all migrations synchronously,
-// so a successful ping means the store is fully ready.
+// Ready implements healthroutes.Checker. It pings the database and verifies
+// the schema is at least the version this binary requires.
 func (s *Store) Ready(ctx context.Context) error {
-	return s.db.PingContext(ctx)
+	if err := s.db.PingContext(ctx); err != nil {
+		return err
+	}
+	var version int
+	err := s.db.QueryRowContext(ctx, `SELECT version FROM schema_version`).Scan(&version)
+	if err != nil {
+		return fmt.Errorf("sqlite.Ready read schema version: %w", err)
+	}
+	if version < currentSchemaVersion {
+		return fmt.Errorf("sqlite.Ready: schema version %d is below required %d", version, currentSchemaVersion)
+	}
+	return nil
 }
 
-// init creates the schema if it does not already exist.
+// migrate applies schema migrations sequentially up to currentSchemaVersion.
+// Each step is applied only if the schema version is below that step's number.
+//
+// Step 1 is special: it must handle the case where schema_version does not yet
+// exist (a v1.0.0 database), so it checks for the table before reading it.
+//
 // Foreign key enforcement is enabled here; ON DELETE CASCADE handles the
 // user→expense cascade contract defined in domain.UserRepository.Delete.
-func (s *Store) init() error {
+func (s *Store) migrate() error {
 	log.Println("Starting SQLite schema migration...")
 	_, err := s.db.Exec(`PRAGMA foreign_keys = ON`)
 	if err != nil {
 		return fmt.Errorf("sqlite.init enable foreign keys: %w", err)
 	}
 
-	_, err = s.db.Exec(`
+	version, err := s.readSchemaVersion()
+	if err != nil {
+		return err
+	}
+
+	if version < 1 {
+		if err := s.migrateStep1(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// readSchemaVersion returns the current schema version, or 0 if the
+// schema_version table does not yet exist (a v1.0.0 database).
+func (s *Store) readSchemaVersion() (int, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'`,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("sqlite.migrate check schema_version table: %w", err)
+	}
+	if count == 0 {
+		return 0, nil
+	}
+	var version int
+	if err := s.db.QueryRow(`SELECT version FROM schema_version`).Scan(&version); err != nil {
+		return 0, fmt.Errorf("sqlite.migrate read schema version: %w", err)
+	}
+	return version, nil
+}
+
+// migrateStep1 creates the schema_version table, the users table, and the
+// expenses table (all idempotent), then records schema version 1.
+func (s *Store) migrateStep1() error {
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_version (
+			version INTEGER NOT NULL
+		);
+
 		CREATE TABLE IF NOT EXISTS users (
-			id           TEXT PRIMARY KEY,
-			username     TEXT NOT NULL UNIQUE,
-			display_name TEXT NOT NULL DEFAULT '',
+			id            TEXT PRIMARY KEY,
+			username      TEXT NOT NULL UNIQUE,
+			display_name  TEXT NOT NULL DEFAULT '',
 			password_hash TEXT NOT NULL
 		);
 
@@ -112,10 +172,14 @@ func (s *Store) init() error {
 			amount      REAL NOT NULL,
 			created_at  TEXT NOT NULL
 		);
+
+		DELETE FROM schema_version;
+		INSERT INTO schema_version (version) VALUES (1);
 	`)
 	if err != nil {
-		return fmt.Errorf("sqlite.init create schema: %w", err)
+		return fmt.Errorf("sqlite.migrate step 1: %w", err)
 	}
+
 	log.Println("SQLite schema migration completed successfully.")
 	return nil
 }
