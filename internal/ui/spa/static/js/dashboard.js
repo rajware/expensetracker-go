@@ -6,6 +6,7 @@ const Dashboard = (() => {
     let _currentPage = 1;
     let _pageSize = CONFIG.PAGE_SIZE || 25;
     let _totalCount = 0;
+    let _modalKeyListener = null;
 
     // ── Helpers ────────────────────────────────────────────────
     const _esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -254,6 +255,14 @@ const Dashboard = (() => {
         `;
 
         document.body.insertAdjacentHTML('beforeend', html);
+
+        const _onKey = (e) => {
+            if (e.key === 'Enter')  { e.preventDefault(); Dashboard._saveExpense(id); }
+            if (e.key === 'Escape') { Dashboard._closeModal(); }
+        };
+        document.addEventListener('keydown', _onKey);
+        _modalKeyListener = _onKey;
+
         setTimeout(() => {
             const f = document.getElementById('exp-date');
             if (f) f.focus();
@@ -261,6 +270,10 @@ const Dashboard = (() => {
     };
 
     const _closeModal = () => {
+        if (_modalKeyListener) {
+            document.removeEventListener('keydown', _modalKeyListener);
+            _modalKeyListener = null;
+        }
         const m = document.getElementById('expense-modal');
         if (m) m.remove();
         const c = document.getElementById('confirm-modal');
