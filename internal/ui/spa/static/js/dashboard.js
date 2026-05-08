@@ -7,6 +7,11 @@ const Dashboard = (() => {
     let _pageSize = CONFIG.PAGE_SIZE || 25;
     let _totalCount = 0;
     let _modalKeyListener = null;
+    let _catSuggestions = [];
+    let _selectedCatID = '';
+    let _lastSelectedCatName = '';
+    let _catHighlightedIdx = -1;
+    let _categories = [];
 
     // ── Helpers ────────────────────────────────────────────────
     const _esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -31,17 +36,29 @@ const Dashboard = (() => {
         _container = container;
         container.innerHTML = `<div style="padding:20px;color:var(--color-text-muted)"><span class="spinner"></span> Loading…</div>`;
 
-        await _fetchData();
+        await Promise.all([
+            _fetchData(),
+            _fetchCategories()
+        ]);
 
         _render();
+    };
+
+    const _fetchCategories = async () => {
+        const res = await Api.getCategories();
+        if (res && res.ok) {
+            _categories = await res.json();
+        }
     };
 
     const _fetchData = async () => {
         const from = document.getElementById('flt-from')?.value || _firstOfMonth();
         const to = document.getElementById('flt-to')?.value || _today();
+        const catID = document.getElementById('flt-cat')?.value || '';
 
         const params = {
             from, to,
+            category_id: catID,
             page: _currentPage,
             page_size: _pageSize,
             sort_by: _sortCol === 'date' ? 'occurred_at' : _sortCol,
@@ -77,6 +94,12 @@ const Dashboard = (() => {
                     <input class="form-input toolbar-date" type="date" id="flt-to"
                            value="${_today()}" onchange="Dashboard._applyFilters()">
                     <div class="toolbar-sep"></div>
+                    <span class="toolbar-label">Category</span>
+                    <select class="form-input" id="flt-cat" onchange="Dashboard._applyFilters()">
+                        <option value="">All Categories</option>
+                        ${_categories.map(c => `<option value="${c.id}">${_esc(c.name)}</option>`).join('')}
+                    </select>
+                    <div class="toolbar-sep"></div>
                     <button class="btn btn-secondary btn-sm" onclick="Dashboard._clearFilters()">Clear</button>
                 </div>
 
@@ -85,6 +108,7 @@ const Dashboard = (() => {
                         <thead>
                             <tr>
                                 <th onclick="Dashboard._sort('occurred_at')" class="${_sortClass('occurred_at')}">Date</th>
+                                <th style="width: 140px">Category</th>
                                 <th onclick="Dashboard._sort('description')" class="${_sortClass('description')}">Description</th>
                                 <th onclick="Dashboard._sort('amount')"      class="${_sortClass('amount')} col-amount">Amount</th>
                                 <th class="col-actions"></th>
@@ -113,6 +137,7 @@ const Dashboard = (() => {
         return _expenses.map(e => `
             <tr id="exp-row-${e.id}">
                 <td class="col-date">${_fmtDate(e.occurred_at)}</td>
+                <td><span class="badge">${_esc(e.category_name || 'Uncategorised')}</span></td>
                 <td>${_esc(e.description || '')}</td>
                 <td class="col-amount">${_fmtAmount(e.amount)}</td>
                 <td class="col-actions">
@@ -205,7 +230,20 @@ const Dashboard = (() => {
     const _clearFilters = () => {
         document.getElementById('flt-from').value = _firstOfMonth();
         document.getElementById('flt-to').value = _today();
+        document.getElementById('flt-cat').value = '';
         _applyFilters();
+    };
+
+    const _refreshFilterDropdown = () => {
+        const select = document.getElementById('flt-cat');
+        if (!select) return;
+        const currentVal = select.value;
+        let html = '<option value="">All Categories</option>';
+        _categories.forEach(c => {
+            html += `<option value="${c.id}">${_esc(c.name)}</option>`;
+        });
+        select.innerHTML = html;
+        select.value = currentVal;
     };
 
     // ── Expense Modal ─────────────────────────────────────────
@@ -242,6 +280,16 @@ const Dashboard = (() => {
                                    value="${amount}" min="0.01" step="0.01"
                                    placeholder="0.00" required>
                         </div>
+                        <div class="form-group">
+                            <label class="form-label" for="exp-cat">Category</label>
+                            <div class="cat-wrap is-selected">
+                                <input class="form-input" type="text" id="exp-cat"
+                                       value="${_esc(expense ? expense.category_name : 'Uncategorised')}"
+                                       autocomplete="off" placeholder="Type to search or create...">
+                                <div class="cat-dropdown" id="cat-suggestions" hidden></div>
+                            </div>
+                            <input type="hidden" id="exp-cat-id" value="${expense ? expense.category_id : '00000000-0000-0000-0000-000000000002'}">
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button class="btn btn-secondary" onclick="Dashboard._closeModal()">Cancel</button>
@@ -253,6 +301,7 @@ const Dashboard = (() => {
                 </div>
             </div>
         `;
+        _lastSelectedCatName = expense ? expense.category_name : 'Uncategorised';
 
         document.body.insertAdjacentHTML('beforeend', html);
 
@@ -267,6 +316,107 @@ const Dashboard = (() => {
             const f = document.getElementById('exp-date');
             if (f) f.focus();
         }, 50);
+
+        // Wire up autocomplete
+        const catInput = document.getElementById('exp-cat');
+        if (catInput) {
+            catInput.addEventListener('input', (e) => Dashboard._onCatInput(e.target.value));
+            catInput.addEventListener('keydown', (e) => Dashboard._onCatKey(e));
+            catInput.addEventListener('focus', (e) => {
+                Dashboard._onCatInput(e.target.value, true);
+            });
+        }
+    };
+
+    const _onCatInput = async (val, force = false) => {
+        _catHighlightedIdx = -1;
+        document.querySelector('.cat-wrap')?.classList.remove('is-selected');
+
+        const dropdown = document.getElementById('cat-suggestions');
+        const query = val.trim();
+        
+        // Show all if empty or "Uncategorised" when forced (on focus)
+        const isDefault = !query || query.toLowerCase() === 'uncategorised';
+        if (isDefault && !force) {
+            dropdown.hidden = true;
+            return;
+        }
+
+        const res = await Api.getCategories(isDefault ? '' : query);
+        if (res && res.ok) {
+            _catSuggestions = await res.json();
+            _renderCatSuggestions(val, dropdown);
+        }
+    };
+
+    const _renderCatSuggestions = (typed, dropdown) => {
+        const query = typed.trim();
+        const exactMatch = _catSuggestions.find(c => c.name.toLowerCase() === query.toLowerCase());
+        
+        let html = '';
+        _catSuggestions.forEach((c, i) => {
+            html += `<div class="cat-option" onclick="Dashboard._selectCat('${c.id}', '${_esc(c.name)}')">${_esc(c.name)}</div>`;
+        });
+
+        if (query && query.toLowerCase() !== 'uncategorised' && !exactMatch) {
+            html += `<div class="cat-option cat-option--create" onclick="Dashboard._createCat('${_esc(query)}')">
+                        + Create new category "<strong>${_esc(query)}</strong>"
+                    </div>`;
+        }
+
+        if (!html) {
+            html = `<div class="cat-option cat-option--empty">No matches found.</div>`;
+        }
+
+        dropdown.innerHTML = html;
+        dropdown.hidden = false;
+    };
+
+    const _onCatKey = (e) => {
+        const dropdown = document.getElementById('cat-suggestions');
+        if (dropdown.hidden) return;
+
+        const options = dropdown.querySelectorAll('.cat-option');
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            _catHighlightedIdx = (_catHighlightedIdx + 1) % options.length;
+            _highlightOption(options);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            _catHighlightedIdx = (_catHighlightedIdx - 1 + options.length) % options.length;
+            _highlightOption(options);
+        } else if (e.key === 'Enter' && _catHighlightedIdx >= 0) {
+            e.preventDefault();
+            options[_catHighlightedIdx].click();
+        }
+    };
+
+    const _highlightOption = (options) => {
+        options.forEach((opt, i) => {
+            opt.classList.toggle('highlighted', i === _catHighlightedIdx);
+            if (i === _catHighlightedIdx) opt.scrollIntoView({ block: 'nearest' });
+        });
+    };
+
+    const _selectCat = (id, name) => {
+        document.getElementById('exp-cat').value = name;
+        document.getElementById('exp-cat-id').value = id;
+        _lastSelectedCatName = name;
+        document.getElementById('cat-suggestions').hidden = true;
+        document.querySelector('.cat-wrap')?.classList.add('is-selected');
+    };
+
+    const _createCat = async (name) => {
+        const res = await Api.createCategory(name);
+        if (res && (res.ok || res.status === 201)) {
+            const cat = await res.json();
+            _categories.push(cat);
+            _refreshFilterDropdown();
+            _selectCat(cat.id, cat.name);
+        } else {
+            const msg = await Api.handleError(res, 'Could not create category.');
+            alert(msg);
+        }
     };
 
     const _closeModal = () => {
@@ -291,6 +441,8 @@ const Dashboard = (() => {
         const date = document.getElementById('exp-date').value;
         const desc = document.getElementById('exp-desc').value.trim();
         const amountRaw = document.getElementById('exp-amount').value;
+        let catID = document.getElementById('exp-cat-id').value;
+        const catName = document.getElementById('exp-cat').value.trim();
 
         if (!date) { showErr('Please select a date.'); return; }
         if (!desc) { showErr('Please enter a description.'); return; }
@@ -298,10 +450,30 @@ const Dashboard = (() => {
             showErr('Please enter a valid amount.'); return;
         }
 
+        // If the name in the box doesn't match the ID we have, and it's not Uncategorised,
+        // we should warn the user that they need to select or create a category.
+        // (Unless they just cleared it, then we default to Uncategorised).
+        if (!catName) {
+            catID = "00000000-0000-0000-0000-000000000002";
+        } else if (catName !== _lastSelectedCatName) {
+            // Check if it's an exact match for an existing category
+            const match = _categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
+            if (match) {
+                catID = match.id;
+                _lastSelectedCatName = match.name; // optional but good for consistency
+                document.getElementById('exp-cat').value = match.name; // normalize casing
+                document.querySelector('.cat-wrap')?.classList.add('is-selected');
+            } else {
+                showErr('Category not found. Please select from the list or create it.');
+                return;
+            }
+        }
+
         const payload = {
             occurred_at: date + 'T00:00:00Z',
             description: desc,
             amount: Number(Number(amountRaw).toFixed(2)),
+            category_id: catID
         };
 
         const btn = document.getElementById('btn-save-expense');
@@ -405,15 +577,13 @@ const Dashboard = (() => {
         _sort, _applyFilters, _clearFilters,
         _openExpenseModal, _closeModal, _saveExpense,
         _confirmDelete, _deleteExpense,
-        _prevPage, _nextPage
+        _prevPage, _nextPage,
+        _onCatInput, _onCatKey, _selectCat, _createCat
     };
 })();
 
 function _modalBackdropClick(e) {
     if (e.target === e.currentTarget) {
-        const m = document.getElementById('expense-modal');
-        if (m) m.remove();
-        const c = document.getElementById('confirm-modal');
-        if (c) c.remove();
+        e.target.remove();
     }
 }

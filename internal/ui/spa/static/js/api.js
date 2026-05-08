@@ -30,8 +30,13 @@ const Api = (() => {
     const handleError = async (res, fallbackMsg) => {
         if (!res) return fallbackMsg;
         try {
-            const data = await res.json();
-            return data.error || fallbackMsg;
+            const text = await res.text();
+            try {
+                const data = JSON.parse(text);
+                return data.error || data.message || text || fallbackMsg;
+            } catch {
+                return text || fallbackMsg;
+            }
         } catch {
             return fallbackMsg;
         }
@@ -72,6 +77,7 @@ const Api = (() => {
         if (params.page_size) qs.set('page_size', params.page_size);
         if (params.sort_by) qs.set('sort_by', params.sort_by);
         if (params.sort_desc) qs.set('sort_desc', params.sort_desc);
+        if (params.category_id) qs.set('category_id', params.category_id);
         const q = qs.toString();
         return get('/api/expenses' + (q ? '?' + q : ''));
     };
@@ -85,11 +91,25 @@ const Api = (() => {
     const deleteExpense = (id) =>
         del(`/api/expenses/${id}`);
 
+    // Categories
+    const getCategories = (prefix = '') =>
+        get(`/api/categories${prefix ? '?prefix=' + encodeURIComponent(prefix) : ''}`);
+
+    const createCategory = (name) =>
+        post('/api/categories', { name });
+
+    const updateCategory = (id, name) =>
+        patch(`/api/categories/${id}`, { name });
+
+    const deleteCategory = (id) =>
+        del(`/api/categories/${id}`);
+
     return {
         get, post, put, del,
         handleError,
         signup, login, logout, touchSession,
         getMe, updateMe, updatePassword, closeAccount,
         getExpenses, createExpense, updateExpense, deleteExpense,
+        getCategories, createCategory, updateCategory, deleteCategory,
     };
 })();

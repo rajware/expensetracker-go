@@ -16,6 +16,7 @@
     <script src="js/config.js"></script>
     <script src="js/api.js"></script>
     <script src="js/dashboard.js"></script>
+    <script src="js/categories.js"></script>
     <script src="js/profile.js"></script>
     <script src="js/nav.js"></script>
 
@@ -23,6 +24,7 @@
         // Page loader registry — each module registers itself here
         const PageLoaders = {
             dashboard: (el) => Dashboard.load(el),
+            categories: (el) => Categories.load(el),
             profile: (el) => Profile.load(el),
         };
 

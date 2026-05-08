@@ -5,6 +5,7 @@ const Nav = (() => {
 
     const pages = {
         dashboard: { label: 'Dashboard', file: 'dashboard' },
+        categories: { label: 'Categories', file: 'categories' },
         profile: { label: 'Profile', file: 'profile' },
     };
 
@@ -27,6 +28,7 @@ const Nav = (() => {
         if (!nav) return;
 
         nav.style.setProperty('--nav-bg', CONFIG.NAV_BG);
+        document.documentElement.style.setProperty('--color-brand', CONFIG.NAV_BG);
 
         const displayLabel = (_user.display_name && _user.display_name.trim())
             ? _user.display_name.trim()
@@ -41,6 +43,8 @@ const Nav = (() => {
             <div class="nav-right">
                 <a class="nav-link ${_currentPage === 'dashboard' ? 'active' : ''}"
                    href="#" onclick="navigate('dashboard'); return false;">Dashboard</a>
+                <a class="nav-link ${_currentPage === 'categories' ? 'active' : ''}"
+                   href="#" onclick="navigate('categories'); return false;">Categories</a>
                 <div class="user-chip-wrap" id="user-chip-wrap">
                     <button class="user-chip" id="user-chip" onclick="Nav._toggleDropdown()">
                         <span class="user-avatar">${initials}</span>

@@ -15,9 +15,10 @@
     --color-border-strong: #b8b5ae;
     --color-text: #1a1917;
     --color-text-muted: #6b6862;
-    --color-accent: #2563eb;
-    --color-accent-bg: #eff6ff;
-    --color-accent-hover: #1d4ed8;
+    --color-brand: #1d4ed8; /* Default, overridden by nav.js from CONFIG.NAV_BG */
+    --color-accent: var(--color-brand);
+    --color-accent-bg: color-mix(in srgb, var(--color-brand), white 92%);
+    --color-accent-hover: color-mix(in srgb, var(--color-brand), black 15%);
     --color-danger: #dc2626;
     --color-danger-bg: #fef2f2;
     --color-success: #16a34a;
@@ -653,6 +654,15 @@ a:hover {
 /* ── Category autocomplete ── */
 .cat-wrap {
     position: relative;
+}
+
+.cat-wrap.is-selected .form-input {
+    border-color: var(--color-brand);
+    padding-right: 30px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%2316a34a'%3E%3Cpath fill-rule='evenodd' d='M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z' clip-rule='evenodd' /%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 18px;
 }
 
 .cat-dropdown {
