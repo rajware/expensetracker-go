@@ -12,10 +12,11 @@ import (
 )
 
 type handler struct {
-	users     domain.UserService
-	expenses  domain.ExpenseService
-	auth      auth.Authenticator
-	transport TokenTransport
+	users      domain.UserService
+	expenses   domain.ExpenseService
+	categories domain.CategoryService
+	auth       auth.Authenticator
+	transport  TokenTransport
 }
 
 // NewHandler constructs and returns the REST API handler.
@@ -25,10 +26,11 @@ type handler struct {
 func NewHandler(
 	users domain.UserService,
 	expenses domain.ExpenseService,
+	categories domain.CategoryService,
 	a auth.Authenticator,
 	t TokenTransport,
 ) http.Handler {
-	h := &handler{users: users, expenses: expenses, auth: a, transport: t}
+	h := &handler{users: users, expenses: expenses, categories: categories, auth: a, transport: t}
 
 	mux := http.NewServeMux()
 
@@ -46,11 +48,17 @@ func NewHandler(
 	mux.Handle("DELETE /users/me", protected(h.handleDeleteMe))
 	mux.Handle("POST /users/me/keepalive", protected(h.handleKeepalive))
 	mux.Handle("POST /users/me/signout", protected(h.handleSignOut))
+
 	mux.Handle("POST /expenses", protected(h.handleAddExpense))
 	mux.Handle("GET /expenses", protected(h.handleQueryExpenses))
 	mux.Handle("GET /expenses/{id}", protected(h.handleGetExpense))
 	mux.Handle("PATCH /expenses/{id}", protected(h.handleUpdateExpense))
 	mux.Handle("DELETE /expenses/{id}", protected(h.handleDeleteExpense))
+
+	mux.Handle("POST /categories", protected(h.handleAddCategory))
+	mux.Handle("GET /categories", protected(h.handleQueryCategories))
+	mux.Handle("PATCH /categories/{id}", protected(h.handleUpdateCategory))
+	mux.Handle("DELETE /categories/{id}", protected(h.handleDeleteCategory))
 
 	return mux
 }
@@ -79,17 +87,23 @@ func writeJSONWithStatus(w http.ResponseWriter, status int, v any) {
 func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, domain.ErrUserNotFound),
-		errors.Is(err, domain.ErrExpenseNotFound):
+		errors.Is(err, domain.ErrExpenseNotFound),
+		errors.Is(err, domain.ErrCategoryNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
-	case errors.Is(err, domain.ErrExpenseNotOwned):
+	case errors.Is(err, domain.ErrExpenseNotOwned),
+		errors.Is(err, domain.ErrCategoryNotOwned):
 		http.Error(w, err.Error(), http.StatusForbidden)
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 	case errors.Is(err, domain.ErrUsernameTaken),
 		errors.Is(err, domain.ErrUsernameEmpty),
+		errors.Is(err, domain.ErrUsernameReserved),
 		errors.Is(err, domain.ErrPasswordTooShort),
 		errors.Is(err, domain.ErrDescriptionEmpty),
-		errors.Is(err, domain.ErrAmountNotPositive):
+		errors.Is(err, domain.ErrAmountNotPositive),
+		errors.Is(err, domain.ErrCategoryNameTaken),
+		errors.Is(err, domain.ErrCategoryNameEmpty),
+		errors.Is(err, domain.ErrCategoryNotDeletable):
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 	default:
 		http.Error(w, "internal error", http.StatusInternalServerError)

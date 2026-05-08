@@ -21,21 +21,23 @@ import (
 // testEnv holds a fully wired handler and the services it uses,
 // so individual tests can interact with the domain directly to set up state.
 type testEnv struct {
-	handler  http.Handler
-	users    domain.UserService
-	expenses domain.ExpenseService
-	auth     *cookie.Authenticator
+	handler    http.Handler
+	users      domain.UserService
+	expenses   domain.ExpenseService
+	categories domain.CategoryService
+	auth       *cookie.Authenticator
 }
 
 func newTestEnv() testEnv {
 	app := domaintest.NewMockApp()
 	a := cookie.New([]byte("test-key"), time.Minute, false)
-	h := rest.NewHandler(app.UserService, app.ExpenseService, a, a)
+	h := rest.NewHandler(app.UserService, app.ExpenseService, app.CategoryService, a, a)
 	return testEnv{
-		handler:  h,
-		users:    app.UserService,
-		expenses: app.ExpenseService,
-		auth:     a,
+		handler:    h,
+		users:      app.UserService,
+		expenses:   app.ExpenseService,
+		categories: app.CategoryService,
+		auth:       a,
 	}
 }
 
@@ -329,7 +331,7 @@ func TestGetExpense_Success(t *testing.T) {
 		t.Fatalf("setup: expected 201, got %d", addResp.StatusCode)
 	}
 
-	var expense domain.Expense
+	var expense domain.ExpenseView
 	if err := json.NewDecoder(addResp.Body).Decode(&expense); err != nil {
 		t.Fatalf("decode add response: %v", err)
 	}
@@ -368,7 +370,7 @@ func TestGetExpense_WrongOwner(t *testing.T) {
 	if addResp.StatusCode != http.StatusCreated {
 		t.Fatalf("setup: expected 201, got %d", addResp.StatusCode)
 	}
-	var expense domain.Expense
+	var expense domain.ExpenseView
 	if err := json.NewDecoder(addResp.Body).Decode(&expense); err != nil {
 		t.Fatalf("decode add response: %v", err)
 	}
@@ -396,7 +398,7 @@ func TestUpdateExpense_Success(t *testing.T) {
 	if addResp.StatusCode != http.StatusCreated {
 		t.Fatalf("setup: expected 201, got %d", addResp.StatusCode)
 	}
-	var expense domain.Expense
+	var expense domain.ExpenseView
 	if err := json.NewDecoder(addResp.Body).Decode(&expense); err != nil {
 		t.Fatalf("decode add response: %v", err)
 	}
@@ -429,7 +431,7 @@ func TestDeleteExpense_Success(t *testing.T) {
 	if addResp.StatusCode != http.StatusCreated {
 		t.Fatalf("setup: expected 201, got %d", addResp.StatusCode)
 	}
-	var expense domain.Expense
+	var expense domain.ExpenseView
 	if err := json.NewDecoder(addResp.Body).Decode(&expense); err != nil {
 		t.Fatalf("decode add response: %v", err)
 	}
@@ -482,5 +484,120 @@ func TestQueryExpenses_BadQueryParam(t *testing.T) {
 	resp := e.do(r)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Category endpoints
+// ---------------------------------------------------------------------------
+
+func TestAddCategory_Success(t *testing.T) {
+	e := newTestEnv()
+	c := mustSignUp(t, &e, "alice", "password123")
+
+	body := jsonBody(t, map[string]string{"name": "Food"})
+	r := withCookie(httptest.NewRequest(http.MethodPost, "/categories", body), c)
+	resp := e.do(r)
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var view domain.CategoryView
+	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if view.Name != "Food" {
+		t.Errorf("expected name 'Food', got %q", view.Name)
+	}
+}
+
+func TestAddCategory_DuplicateName(t *testing.T) {
+	e := newTestEnv()
+	c := mustSignUp(t, &e, "alice", "password123")
+
+	// First one succeeds.
+	e.do(withCookie(httptest.NewRequest(http.MethodPost, "/categories", jsonBody(t, map[string]string{"name": "Food"})), c))
+
+	// Second one fails.
+	body := jsonBody(t, map[string]string{"name": "food"}) // case-insensitive
+	r := withCookie(httptest.NewRequest(http.MethodPost, "/categories", body), c)
+	resp := e.do(r)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d", resp.StatusCode)
+	}
+}
+
+func TestQueryCategories_All(t *testing.T) {
+	e := newTestEnv()
+	c := mustSignUp(t, &e, "alice", "password123")
+
+	e.do(withCookie(httptest.NewRequest(http.MethodPost, "/categories", jsonBody(t, map[string]string{"name": "Food"})), c))
+	e.do(withCookie(httptest.NewRequest(http.MethodPost, "/categories", jsonBody(t, map[string]string{"name": "Transport"})), c))
+
+	r := withCookie(httptest.NewRequest(http.MethodGet, "/categories", nil), c)
+	resp := e.do(r)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var views []domain.CategoryView
+	if err := json.NewDecoder(resp.Body).Decode(&views); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// 2 we added + 1 system "Uncategorised"
+	if len(views) != 3 {
+		t.Errorf("expected 3 categories, got %d", len(views))
+	}
+}
+
+func TestUpdateCategory_Success(t *testing.T) {
+	e := newTestEnv()
+	c := mustSignUp(t, &e, "alice", "password123")
+
+	// Add.
+	resp1 := e.do(withCookie(httptest.NewRequest(http.MethodPost, "/categories", jsonBody(t, map[string]string{"name": "Food"})), c))
+	var cat domain.CategoryView
+	json.NewDecoder(resp1.Body).Decode(&cat)
+
+	// Update.
+	body := jsonBody(t, map[string]string{"name": "Groceries"})
+	r := withCookie(httptest.NewRequest(http.MethodPatch, "/categories/"+cat.ID, body), c)
+	resp := e.do(r)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var updated domain.CategoryView
+	json.NewDecoder(resp.Body).Decode(&updated)
+	if updated.Name != "Groceries" {
+		t.Errorf("expected name 'Groceries', got %q", updated.Name)
+	}
+}
+
+func TestDeleteCategory_Success(t *testing.T) {
+	e := newTestEnv()
+	c := mustSignUp(t, &e, "alice", "password123")
+
+	// Add.
+	resp1 := e.do(withCookie(httptest.NewRequest(http.MethodPost, "/categories", jsonBody(t, map[string]string{"name": "Food"})), c))
+	var cat domain.CategoryView
+	json.NewDecoder(resp1.Body).Decode(&cat)
+
+	// Delete.
+	r := withCookie(httptest.NewRequest(http.MethodDelete, "/categories/"+cat.ID, nil), c)
+	resp := e.do(r)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
+	}
+}
+
+func TestDeleteCategory_Uncategorised(t *testing.T) {
+	e := newTestEnv()
+	c := mustSignUp(t, &e, "alice", "password123")
+
+	r := withCookie(httptest.NewRequest(http.MethodDelete, "/categories/"+domain.UncategorisedCategoryID, nil), c)
+	resp := e.do(r)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d", resp.StatusCode)
 	}
 }

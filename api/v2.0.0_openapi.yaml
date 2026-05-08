@@ -1,0 +1,948 @@
+openapi: 3.0.3
+
+info:
+  title: Expense Tracker API
+  version: "2.0.0"
+  description: |
+    REST API for the Expense Tracker application.
+
+    ## Authentication
+
+    Authentication uses **stateless HMAC-SHA256 signed tokens** delivered as
+    an HTTP-only cookie named `auth_token`. The token is self-contained — the
+    server holds no session state.
+
+    - Tokens are issued on successful sign-in and on keepalive requests.
+    - Tokens expire after a server-configured TTL (default: 2 minutes).
+    - All endpoints marked **Authenticated** require a valid, unexpired
+      `auth_token` cookie. Requests without one receive `401 Unauthorised`.
+    - The token is opaque to clients. Do not parse or store it — the browser
+      cookie jar manages it automatically.
+
+    ## Error responses
+
+    Error responses are plain text (not JSON). The body contains a short
+    human-readable message. Clients should use the HTTP status code for
+    programmatic error handling.
+
+    | Status | Meaning |
+    |--------|---------|
+    | 400 | Malformed request body or invalid query parameter |
+    | 401 | Missing, invalid, or expired auth token; or wrong credentials |
+    | 403 | Authenticated but not authorised (e.g. accessing another user's resource) |
+    | 404 | Resource not found |
+    | 422 | Validation failure (see individual endpoint descriptions) |
+    | 500 | Unexpected server error |
+
+servers:
+  - url: /api
+    description: API prefix — mounted at /api relative to the server root
+
+# ---------------------------------------------------------------------------
+# Reusable security scheme
+# ---------------------------------------------------------------------------
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: auth_token
+      description: |
+        HMAC-SHA256 signed token set by the server on sign-in.
+        Format: `<base64(userID)>:<expiry_unix>:<signature>`.
+        Clients must not construct or modify this value.
+
+  # -------------------------------------------------------------------------
+  # Reusable schemas
+  # -------------------------------------------------------------------------
+  schemas:
+
+    UserView:
+      type: object
+      description: Public representation of a user. Does not include the password hash.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique user identifier.
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        username:
+          type: string
+          description: Unique login name. Cannot be changed after creation.
+          example: "alice"
+        display_name:
+          type: string
+          description: Optional human-friendly name. Empty string means not set.
+          example: "Alice Wonderland"
+      required: [id, username, display_name]
+
+    CategoryView:
+      type: object
+      description: |
+        Representation of a category. Categories are either owned by a
+        specific user (custom) or by the system user (system-managed).
+        System-managed categories cannot be deleted or renamed.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique category identifier.
+          example: "9ebf458f-6628-4909-8b24-bd6f08f4de36"
+        name:
+          type: string
+          description: |
+            Category name. Unique across all categories (case-insensitive).
+          example: "Groceries"
+        owner_id:
+          type: string
+          format: uuid
+          description: |
+            ID of the user who owns this category.
+            System-managed categories have owner_id `00000000-0000-0000-0000-000000000001`.
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      required: [id, name, owner_id]
+
+    ExpenseView:
+      type: object
+      description: Representation of a single expense record.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique expense identifier.
+          example: "f1e2d3c4-b5a6-7890-abcd-123456789012"
+        owner_id:
+          type: string
+          format: uuid
+          description: ID of the user who owns this expense.
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        category_id:
+          type: string
+          format: uuid
+          description: |
+            ID of the category this expense belongs to.
+            Defaults to the Uncategorised category
+            (`00000000-0000-0000-0000-000000000002`).
+          example: "9ebf458f-6628-4909-8b24-bd6f08f4de36"
+        category_name:
+          type: string
+          description: Name of the category at the time of the response.
+          example: "Groceries"
+        occurred_at:
+          type: string
+          format: date-time
+          description: When the expense occurred (RFC 3339).
+          example: "2024-03-15T00:00:00Z"
+        description:
+          type: string
+          description: Human-readable description of the expense.
+          example: "Train ticket to Edinburgh"
+        amount:
+          type: number
+          format: double
+          description: Expense amount. Always positive.
+          example: 42.50
+        created_at:
+          type: string
+          format: date-time
+          description: When this record was created (RFC 3339).
+          example: "2024-03-15T09:23:11Z"
+      required: [id, owner_id, category_id, category_name, occurred_at, description, amount, created_at]
+
+    ExpenseResult:
+      type: object
+      description: Paginated list of expenses with a total count.
+      properties:
+        expenses:
+          type: array
+          description: |
+            The current page of matching expenses.
+            Empty array if no expenses match the query.
+          items:
+            $ref: '#/components/schemas/ExpenseView'
+        total_count:
+          type: integer
+          description: |
+            Total number of matching expenses across all pages,
+            regardless of the requested page or page_size.
+            Useful for calculating total page count in a UI.
+          example: 47
+      required: [expenses, total_count]
+
+    ErrorResponse:
+      type: string
+      description: Plain-text error message.
+      example: "expense not found"
+
+  # -------------------------------------------------------------------------
+  # Reusable responses
+  # -------------------------------------------------------------------------
+  responses:
+
+    Unauthorised:
+      description: |
+        Missing, invalid, or expired auth token.
+        The client should redirect the user to the sign-in page.
+      content:
+        text/plain:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Forbidden:
+      description: Authenticated but not authorised to access this resource.
+      content:
+        text/plain:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFound:
+      description: The requested resource does not exist.
+      content:
+        text/plain:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    InternalError:
+      description: Unexpected server error.
+      content:
+        text/plain:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+
+  # ── Users ─────────────────────────────────────────────────────────────────
+
+  /users/signup:
+    post:
+      summary: Create a new user account
+      operationId: signUp
+      tags: [Users]
+      description: |
+        Registers a new user. The username must be unique, non-empty, and not
+        reserved. The password must be at least 8 characters.
+        Display name is optional and may be empty.
+
+        This endpoint does **not** issue an auth token. The client must
+        call `POST /users/signin` after signing up.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  description: Unique login name. Cannot be changed later.
+                  example: "alice"
+                display_name:
+                  type: string
+                  description: Optional human-friendly name.
+                  example: "Alice Wonderland"
+                password:
+                  type: string
+                  description: Must be at least 8 characters.
+                  example: "correct-horse-battery"
+              required: [username, password]
+      responses:
+        "201":
+          description: Account created successfully. No response body.
+        "422":
+          description: |
+            Validation failed. Possible causes:
+            - `username must not be empty`
+            - `username is reserved`
+            - `username already taken`
+            - `password must be at least 8 characters`
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /users/signin:
+    post:
+      summary: Sign in and receive an auth token
+      operationId: signIn
+      tags: [Users]
+      description: |
+        Verifies credentials and, on success, sets the `auth_token` cookie.
+        The cookie is `HttpOnly`, `SameSite=Strict`, and `Secure` in
+        production deployments.
+
+        The response body is empty on success. The browser cookie jar
+        will store the token automatically for subsequent requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  example: "alice"
+                password:
+                  type: string
+                  example: "correct-horse-battery"
+              required: [username, password]
+      responses:
+        "204":
+          description: |
+            Sign-in successful. The `auth_token` cookie has been set.
+          headers:
+            Set-Cookie:
+              description: |
+                Sets the `auth_token` cookie. Example value (truncated):
+                `auth_token=<token>; HttpOnly; SameSite=Strict; Max-Age=120`
+              schema:
+                type: string
+        "401":
+          description: Invalid username or password.
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /users/me:
+    get:
+      summary: Get the authenticated user's profile
+      operationId: getMe
+      tags: [Users]
+      security:
+        - cookieAuth: []
+      description: Returns the public profile of the currently signed-in user.
+      responses:
+        "200":
+          description: User profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserView'
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      summary: Update the authenticated user's display name
+      operationId: updateMe
+      tags: [Users]
+      security:
+        - cookieAuth: []
+      description: |
+        Updates the display name of the currently signed-in user.
+        Pass an empty string to remove the display name.
+        The username cannot be changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name:
+                  type: string
+                  description: New display name. Empty string clears it.
+                  example: "Alice W."
+              required: [display_name]
+      responses:
+        "200":
+          description: Updated user profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserView'
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      summary: Permanently delete the authenticated user's account
+      operationId: deleteMe
+      tags: [Users]
+      security:
+        - cookieAuth: []
+      description: |
+        Permanently deletes the authenticated user's account and **all
+        expenses owned by that user**. This action cannot be undone.
+
+        On success, the `auth_token` cookie is cleared.
+      responses:
+        "204":
+          description: Account deleted. The `auth_token` cookie has been cleared.
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /users/me/keepalive:
+    post:
+      summary: Extend the current session
+      operationId: keepalive
+      tags: [Users]
+      security:
+        - cookieAuth: []
+      description: |
+        Issues a fresh `auth_token` cookie, resetting the token TTL.
+        Clients should call this periodically (e.g. every 60 seconds)
+        while the user is active to prevent the session from expiring.
+      responses:
+        "204":
+          description: Session extended. A new `auth_token` cookie has been set.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /users/me/password:
+    post:
+      summary: Update the authenticated user's password
+      operationId: updatePassword
+      tags: [Users]
+      security:
+        - cookieAuth: []
+      description: |
+        Changes the password for the authenticated user.
+        The old password must be correct, and the new password must be
+        at least 8 characters long.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                old_password:
+                  type: string
+                  description: The current password.
+                  example: "old-password-123"
+                new_password:
+                  type: string
+                  description: The new password. Must be at least 8 characters.
+                  example: "new-secure-password-456"
+              required: [old_password, new_password]
+      responses:
+        "204":
+          description: Password updated successfully.
+        "401":
+          description: Incorrect old password.
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "422":
+          description: New password is too short.
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /users/me/signout:
+    post:
+      summary: Sign out and clear the auth token
+      operationId: signOut
+      tags: [Users]
+      security:
+        - cookieAuth: []
+      description: |
+        Clears the `auth_token` cookie. Because tokens are stateless,
+        the server does not maintain a revocation list — the token
+        simply becomes unreferenced by the client.
+      responses:
+        "204":
+          description: Signed out. The `auth_token` cookie has been cleared.
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  # ── Expenses ──────────────────────────────────────────────────────────────
+
+  /expenses:
+    post:
+      summary: Record a new expense
+      operationId: addExpense
+      tags: [Expenses]
+      security:
+        - cookieAuth: []
+      description: |
+        Creates a new expense owned by the authenticated user.
+        The description must be non-empty and the amount must be positive.
+        If `category_id` is omitted or empty, the expense is assigned to
+        the Uncategorised category.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                occurred_at:
+                  type: string
+                  format: date-time
+                  description: When the expense occurred (RFC 3339).
+                  example: "2024-03-15T00:00:00Z"
+                description:
+                  type: string
+                  description: Human-readable description. Must not be empty.
+                  example: "Train ticket to Edinburgh"
+                amount:
+                  type: number
+                  format: double
+                  description: Expense amount. Must be greater than zero.
+                  example: 42.50
+                category_id:
+                  type: string
+                  format: uuid
+                  description: |
+                    Category to assign this expense to. Optional.
+                    Defaults to Uncategorised if omitted or empty.
+                  example: "9ebf458f-6628-4909-8b24-bd6f08f4de36"
+              required: [occurred_at, description, amount]
+      responses:
+        "201":
+          description: Expense created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseView'
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "422":
+          description: |
+            Validation failed. Possible causes:
+            - `description must not be empty`
+            - `amount must be greater than zero`
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      summary: Query expenses
+      operationId: queryExpenses
+      tags: [Expenses]
+      security:
+        - cookieAuth: []
+      description: |
+        Returns a filtered, sorted, and paginated list of the authenticated
+        user's expenses.
+
+        All query parameters are optional. Omitting `page` and `page_size`
+        returns all matching results. `total_count` in the response always
+        reflects the total number of matching expenses regardless of
+        pagination, allowing clients to calculate page counts.
+      parameters:
+        - name: from
+          in: query
+          description: |
+            Filter expenses with `occurred_at` on or after this date.
+            Format: `YYYY-MM-DD`.
+          schema:
+            type: string
+            format: date
+          example: "2024-03-01"
+        - name: to
+          in: query
+          description: |
+            Filter expenses with `occurred_at` on or before this date.
+            Format: `YYYY-MM-DD`.
+          schema:
+            type: string
+            format: date
+          example: "2024-03-31"
+        - name: category_id
+          in: query
+          description: |
+            Filter expenses by category ID. Omit to return expenses in
+            all categories.
+          schema:
+            type: string
+            format: uuid
+          example: "9ebf458f-6628-4909-8b24-bd6f08f4de36"
+        - name: sort_by
+          in: query
+          description: Field to sort results by. Defaults to `date`.
+          schema:
+            type: string
+            enum: [date, description, amount]
+            default: date
+        - name: sort_desc
+          in: query
+          description: If `true`, sort in descending order. Defaults to ascending.
+          schema:
+            type: boolean
+            default: false
+        - name: page
+          in: query
+          description: |
+            1-based page number. Must be >= 1 if provided.
+            Omit to return all results.
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+        - name: page_size
+          in: query
+          description: |
+            Number of results per page. Must be >= 1 if provided.
+            Omit to return all results.
+          schema:
+            type: integer
+            minimum: 1
+          example: 20
+      responses:
+        "200":
+          description: Query results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseResult'
+        "400":
+          description: Invalid query parameter value.
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /expenses/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: UUID of the expense.
+        schema:
+          type: string
+          format: uuid
+        example: "f1e2d3c4-b5a6-7890-abcd-123456789012"
+
+    get:
+      summary: Get a single expense by ID
+      operationId: getExpense
+      tags: [Expenses]
+      security:
+        - cookieAuth: []
+      description: |
+        Returns the expense with the given ID.
+        Returns `403` if the expense exists but belongs to another user.
+      responses:
+        "200":
+          description: The requested expense.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseView'
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      summary: Update an expense
+      operationId: updateExpense
+      tags: [Expenses]
+      security:
+        - cookieAuth: []
+      description: |
+        Replaces the editable fields of the expense with the provided values.
+        `occurred_at`, `description`, and `amount` are required.
+        `category_id` is optional — if omitted or empty, the existing
+        category is preserved.
+        Returns `403` if the expense belongs to another user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                occurred_at:
+                  type: string
+                  format: date-time
+                  description: Updated date of the expense (RFC 3339).
+                  example: "2024-03-16T00:00:00Z"
+                description:
+                  type: string
+                  description: Updated description. Must not be empty.
+                  example: "Train ticket to Edinburgh (return)"
+                amount:
+                  type: number
+                  format: double
+                  description: Updated amount. Must be greater than zero.
+                  example: 85.00
+                category_id:
+                  type: string
+                  format: uuid
+                  description: |
+                    Updated category. Optional — omit to keep the existing
+                    category unchanged.
+                  example: "9ebf458f-6628-4909-8b24-bd6f08f4de36"
+              required: [occurred_at, description, amount]
+      responses:
+        "200":
+          description: Updated expense.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseView'
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          description: |
+            Validation failed. Possible causes:
+            - `description must not be empty`
+            - `amount must be greater than zero`
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      summary: Delete an expense
+      operationId: deleteExpense
+      tags: [Expenses]
+      security:
+        - cookieAuth: []
+      description: |
+        Permanently deletes the expense with the given ID.
+        Returns `403` if the expense belongs to another user.
+      responses:
+        "204":
+          description: Expense deleted. No response body.
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  # ── Categories ────────────────────────────────────────────────────────────
+
+  /categories:
+    get:
+      summary: Query categories
+      operationId: queryCategories
+      tags: [Categories]
+      security:
+        - cookieAuth: []
+      description: |
+        Returns all categories whose names start with `prefix`
+        (case-insensitive), sorted alphabetically by name.
+        Omitting `prefix` returns all categories, including system-managed
+        ones such as Uncategorised.
+      parameters:
+        - name: prefix
+          in: query
+          description: |
+            Case-insensitive name prefix to filter by.
+            Omit or leave empty to return all categories.
+          schema:
+            type: string
+          example: "Gro"
+      responses:
+        "200":
+          description: List of matching categories.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CategoryView'
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      summary: Create a new category
+      operationId: addCategory
+      tags: [Categories]
+      security:
+        - cookieAuth: []
+      description: |
+        Creates a new category owned by the authenticated user.
+        Category names are unique across all users and the system,
+        case-insensitively.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Category name. Must not be empty or whitespace-only.
+                  example: "Groceries"
+              required: [name]
+      responses:
+        "201":
+          description: Category created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryView'
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "422":
+          description: |
+            Validation failed. Possible causes:
+            - `category name must not be empty`
+            - `category name already taken`
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /categories/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: UUID of the category.
+        schema:
+          type: string
+          format: uuid
+        example: "9ebf458f-6628-4909-8b24-bd6f08f4de36"
+
+    patch:
+      summary: Rename a category
+      operationId: updateCategory
+      tags: [Categories]
+      security:
+        - cookieAuth: []
+      description: |
+        Renames the category with the given ID.
+        Returns `403` if the category belongs to another user or is
+        system-managed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: New category name. Must not be empty or whitespace-only.
+                  example: "Grocery Shopping"
+              required: [name]
+      responses:
+        "200":
+          description: Updated category.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryView'
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          description: |
+            Validation failed. Possible causes:
+            - `category name must not be empty`
+            - `category name already taken`
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      summary: Delete a category
+      operationId: deleteCategory
+      tags: [Categories]
+      security:
+        - cookieAuth: []
+      description: |
+        Deletes the category with the given ID. All expenses currently in
+        this category are reclassified to Uncategorised automatically.
+
+        Returns `403` if the category belongs to another user or is
+        system-managed. Returns `422` if the category is Uncategorised,
+        which cannot be deleted.
+      responses:
+        "204":
+          description: Category deleted. No response body.
+        "401":
+          $ref: '#/components/responses/Unauthorised'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          description: |
+            The category cannot be deleted.
+            Cause: `category cannot be deleted`
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+# ---------------------------------------------------------------------------
+# Tag descriptions
+# ---------------------------------------------------------------------------
+tags:
+  - name: Users
+    description: |
+      Account management and session handling.
+      Sign-up and sign-in are unauthenticated. All other user endpoints
+      require a valid `auth_token` cookie.
+  - name: Expenses
+    description: |
+      Expense CRUD operations. All endpoints require a valid `auth_token`
+      cookie. Users can only access their own expenses.
+  - name: Categories
+    description: |
+      Category management. All endpoints require a valid `auth_token` cookie.
+      Categories are shared across all users — names are unique
+      case-insensitively. Users may only modify or delete categories they own.
+      System-managed categories (owned by the system user) cannot be modified
+      or deleted by any user.

@@ -15,18 +15,19 @@ func (h *handler) handleAddExpense(w http.ResponseWriter, r *http.Request) {
 		OccurredAt  time.Time `json:"occurred_at"`
 		Description string    `json:"description"`
 		Amount      float64   `json:"amount"`
+		CategoryId  string    `json:"category_id"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
 	userID := userIDFromContext(r.Context())
-	expense, err := h.expenses.Add(r.Context(), userID, body.OccurredAt, body.Description, body.Amount)
+	expense, err := h.expenses.Add(r.Context(), userID, body.OccurredAt, body.Description, body.Amount, body.CategoryId)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSONWithStatus(w, http.StatusCreated, domain.NewExpenseView(*expense))
+	writeJSONWithStatus(w, http.StatusCreated, *expense)
 }
 
 func (h *handler) handleQueryExpenses(w http.ResponseWriter, r *http.Request) {
@@ -60,18 +61,19 @@ func (h *handler) handleUpdateExpense(w http.ResponseWriter, r *http.Request) {
 		Description string    `json:"description"`
 		OccurredAt  time.Time `json:"occurred_at"`
 		Amount      float64   `json:"amount"`
+		CategoryId  string    `json:"category_id"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
 	userID := userIDFromContext(r.Context())
-	expense, err := h.expenses.Update(r.Context(), userID, id, body.Description, body.OccurredAt, body.Amount)
+	expense, err := h.expenses.Update(r.Context(), userID, id, body.Description, body.OccurredAt, body.Amount, body.CategoryId)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, domain.NewExpenseView(*expense))
+	writeJSON(w, *expense)
 }
 
 func (h *handler) handleDeleteExpense(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +106,7 @@ func parseExpenseQuery(w http.ResponseWriter, r *http.Request) (domain.ExpenseQu
 		}
 		q.To = &t
 	}
+	q.CategoryID = params.Get("category_id")
 	switch params.Get("sort_by") {
 	case "description":
 		q.SortBy = domain.SortByDescription

@@ -67,9 +67,10 @@ func main() {
 	}
 
 	var (
-		userService    domain.UserService
-		expenseService domain.ExpenseService
-		checker        healthroutes.Checker
+		userService     domain.UserService
+		expenseService  domain.ExpenseService
+		categoryService domain.CategoryService
+		checker         healthroutes.Checker
 	)
 
 	switch dbDriver {
@@ -83,7 +84,8 @@ func main() {
 			log.Fatalln(err)
 		}
 		userService = domain.NewUserService(store.UserRepository())
-		expenseService = domain.NewExpenseService(store.ExpenseRepository())
+		categoryService = domain.NewCategoryService(store.CategoryRepository())
+		expenseService = domain.NewExpenseService(store.ExpenseRepository(), store.CategoryRepository())
 		checker = store
 
 	case "postgres":
@@ -99,7 +101,8 @@ func main() {
 			log.Fatalln(err)
 		}
 		userService = domain.NewUserService(store.UserRepository())
-		expenseService = domain.NewExpenseService(store.ExpenseRepository())
+		categoryService = domain.NewCategoryService(store.CategoryRepository())
+		expenseService = domain.NewExpenseService(store.ExpenseRepository(), store.CategoryRepository())
 		checker = store
 
 	default:
@@ -107,7 +110,7 @@ func main() {
 	}
 
 	cookieAuth := cookie.New([]byte(hmacKey), 2*time.Minute, false)
-	restHandler := rest.NewHandler(userService, expenseService, cookieAuth, cookieAuth)
+	restHandler := rest.NewHandler(userService, expenseService, categoryService, cookieAuth, cookieAuth)
 	healthHandler := healthroutes.NewHandler(checker)
 	spaHandler := spa.NewHandler()
 
