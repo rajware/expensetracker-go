@@ -8,14 +8,15 @@
 }
 
 :root {
+    --color-brand: #16a34a;
     --nav-h: 46px;
+    --nav-bg: var(--color-brand);
     --color-bg: #f5f4f1;
     --color-surface: #ffffff;
     --color-border: #dddbd5;
     --color-border-strong: #b8b5ae;
     --color-text: #1a1917;
     --color-text-muted: #6b6862;
-    --color-brand: #1d4ed8; /* Default, overridden by nav.js from CONFIG.NAV_BG */
     --color-accent: var(--color-brand);
     --color-accent-bg: color-mix(in srgb, var(--color-brand), white 92%);
     --color-accent-hover: color-mix(in srgb, var(--color-brand), black 15%);
@@ -75,7 +76,7 @@ a:hover {
     left: 0;
     right: 0;
     height: var(--nav-h);
-    background: var(--nav-bg, #1d4ed8);
+    background: var(--nav-bg);
     border-bottom: none;
     display: flex;
     align-items: center;
@@ -703,7 +704,6 @@ a:hover {
     display: flex;
     flex-direction: column;
     gap: 24px;
-    max-width: 900px;
 }
 
 .profile-grid {
@@ -720,11 +720,16 @@ a:hover {
     box-shadow: var(--shadow-sm);
 }
 
+.card-no-padding {
+    padding: 0;
+}
+
 .card-danger {
     border: 1px solid #fee2e2;
 }
 
-.card-danger .card-title {
+.card-danger .card-title,
+.card-danger .btn {
     color: #991b1b;
 }
 

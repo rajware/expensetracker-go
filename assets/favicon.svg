@@ -43,34 +43,33 @@
      inkscape:groupmode="layer"
      id="layer1">
     <g
-       id="g6410"
-       inkscape:label="ET"
-       transform="translate(-1.5874977)">
+       id="g6926"
+       inkscape:label="ET">
       <text
          xml:space="preserve"
-         style="font-style:italic;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:67.255px;font-family:'Liberation Sans';-inkscape-font-specification:'Liberation Sans Bold Italic';fill:#3b82f6;fill-opacity:1;stroke:none;stroke-width:1.75144;stroke-dasharray:none;stroke-opacity:1"
-         x="1.7675785"
+         style="font-style:italic;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:67.255px;font-family:'Liberation Sans';-inkscape-font-specification:'Liberation Sans Bold Italic';fill:#22c55e;fill-opacity:1;stroke:none;stroke-width:1.75144;stroke-dasharray:none;stroke-opacity:1"
+         x="0.013795169"
          y="52.4482"
          id="text790"
          inkscape:label="E"
          transform="scale(0.90518463,1.104747)"><tspan
            sodipodi:role="line"
            id="tspan788"
-           style="font-style:italic;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:67.255px;font-family:'Liberation Sans';-inkscape-font-specification:'Liberation Sans Bold Italic';fill:#3b82f6;fill-opacity:1;stroke:none;stroke-width:1.75144;stroke-dasharray:none;stroke-opacity:1"
-           x="1.7675785"
+           style="font-style:italic;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:67.255px;font-family:'Liberation Sans';-inkscape-font-specification:'Liberation Sans Bold Italic';fill:#22c55e;fill-opacity:1;stroke:none;stroke-width:1.75144;stroke-dasharray:none;stroke-opacity:1"
+           x="0.013795169"
            y="52.4482">E</tspan></text>
       <text
          xml:space="preserve"
-         style="font-style:italic;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:56.0458px;font-family:'Liberation Sans';-inkscape-font-specification:'Liberation Sans Bold Italic';fill:#3b82f6;fill-opacity:1;stroke:none;stroke-width:1.75144;stroke-dasharray:none;stroke-opacity:1"
-         x="37.210239"
+         style="font-style:italic;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:56.0458px;font-family:'Liberation Sans';-inkscape-font-specification:'Liberation Sans Bold Italic';fill:#22c55e;fill-opacity:1;stroke:none;stroke-width:1.75144;stroke-dasharray:none;stroke-opacity:1"
+         x="35.456455"
          y="55.133625"
          id="text2145"
          inkscape:label="T"
          transform="scale(0.90518463,1.104747)"><tspan
            sodipodi:role="line"
            id="tspan2143"
-           style="font-size:56.0458px;fill:#3b82f6;fill-opacity:1;stroke:none;stroke-width:1.75144"
-           x="37.210239"
+           style="font-size:56.0458px;fill:#22c55e;fill-opacity:1;stroke:none;stroke-width:1.75144"
+           x="35.456455"
            y="55.133625">T</tspan></text>
     </g>
   </g>

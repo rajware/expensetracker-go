@@ -27,9 +27,6 @@ const Nav = (() => {
         const nav = document.getElementById('main-nav');
         if (!nav) return;
 
-        nav.style.setProperty('--nav-bg', CONFIG.NAV_BG);
-        document.documentElement.style.setProperty('--color-brand', CONFIG.NAV_BG);
-
         const displayLabel = (_user.display_name && _user.display_name.trim())
             ? _user.display_name.trim()
             : _user.username;

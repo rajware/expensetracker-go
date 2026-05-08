@@ -32,7 +32,7 @@ const Categories = (() => {
                     <button class="btn btn-primary btn-sm" onclick="Categories._openCategoryModal(null)">+ Add Category</button>
                 </div>
 
-                <div class="card">
+                <div class="card card-no-padding">
                     <table class="data-table">
                         <thead>
                             <tr>
@@ -65,7 +65,8 @@ const Categories = (() => {
         return _categories.map(c => {
             const isSystem = c.owner_id === systemUserID;
             const isUncategorised = c.id === uncategorisedID;
-            const canManage = !isSystem && !isUncategorised;
+            const isOwnedByMe = c.owner_id === Nav.getUser().id;
+            const canManage = !isSystem && !isUncategorised && isOwnedByMe;
 
             return `
                 <tr>
