@@ -10,8 +10,9 @@ import (
 
 // TestApp wraps all services.
 type TestApp struct {
-	UserService    domain.UserService
-	ExpenseService domain.ExpenseService
+	UserService     domain.UserService
+	ExpenseService  domain.ExpenseService
+	CategoryService domain.CategoryService
 }
 
 // RunSuite runs the full domain contract test suite against all
@@ -41,6 +42,7 @@ func RunSuite(t *testing.T, factory func() TestApp) {
 	t.Run("SignUp_EmptyUsername", func(t *testing.T) { testSignUpEmptyUsername(t, factory) })
 	t.Run("SignUp_PasswordTooShort", func(t *testing.T) { testSignUpPasswordTooShort(t, factory) })
 	t.Run("SignUp_DuplicateUsername", func(t *testing.T) { testSignUpDuplicateUsername(t, factory) })
+	t.Run("SignUp_ReservedUsername", func(t *testing.T) { testSignUpReservedUsername(t, factory) })
 	t.Run("SignIn_Success", func(t *testing.T) { testSignInSuccess(t, factory) })
 	t.Run("SignIn_WrongPassword", func(t *testing.T) { testSignInWrongPassword(t, factory) })
 	t.Run("SignIn_UnknownUsername", func(t *testing.T) { testSignInUnknownUsername(t, factory) })
@@ -69,6 +71,28 @@ func RunSuite(t *testing.T, factory func() TestApp) {
 	t.Run("QueryByID_Success", func(t *testing.T) { testQueryByIDExpenseSuccess(t, factory) })
 	t.Run("QueryByID_NotFound", func(t *testing.T) { testQueryByIDExpenseNotFound(t, factory) })
 	t.Run("QueryByID_WrongOwner", func(t *testing.T) { testQueryByIDExpenseWrongOwner(t, factory) })
+
+	RunCategorySuite(t, factory)
+}
+
+// RunCategorySuite runs the CategoryService contract tests.
+// It is called by RunSuite but can also be called independently.
+func RunCategorySuite(t *testing.T, factory func() TestApp) {
+	t.Helper()
+
+	t.Run("Category_Add_Success", func(t *testing.T) { testCategoryAddSuccess(t, factory) })
+	t.Run("Category_Add_EmptyName", func(t *testing.T) { testCategoryAddEmptyName(t, factory) })
+	t.Run("Category_Add_DuplicateName", func(t *testing.T) { testCategoryAddDuplicateName(t, factory) })
+	t.Run("Category_Add_CaseInsensitiveDuplicate", func(t *testing.T) { testCategoryAddCaseInsensitiveDuplicate(t, factory) })
+	t.Run("Category_Update_Success", func(t *testing.T) { testCategoryUpdateSuccess(t, factory) })
+	t.Run("Category_Update_WrongOwner", func(t *testing.T) { testCategoryUpdateWrongOwner(t, factory) })
+	t.Run("Category_Update_NotFound", func(t *testing.T) { testCategoryUpdateNotFound(t, factory) })
+	t.Run("Category_Delete_Success", func(t *testing.T) { testCategoryDeleteSuccess(t, factory) })
+	t.Run("Category_Delete_WrongOwner", func(t *testing.T) { testCategoryDeleteWrongOwner(t, factory) })
+	t.Run("Category_Delete_Uncategorised", func(t *testing.T) { testCategoryDeleteUncategorised(t, factory) })
+	t.Run("Category_Query_All", func(t *testing.T) { testCategoryQueryAll(t, factory) })
+	t.Run("Category_Query_Prefix", func(t *testing.T) { testCategoryQueryPrefix(t, factory) })
+	t.Run("Category_Delete_ReclassifiesExpenses", func(t *testing.T) { testCategoryDeleteReclassifiesExpenses(t, factory) })
 }
 
 // ---------------------------------------------------------------------------
@@ -84,13 +108,22 @@ func mustSignUp(t *testing.T, us domain.UserService, username, password string) 
 	return u
 }
 
-func mustAdd(t *testing.T, es domain.ExpenseService, ownerID string, occurredAt time.Time, description string, amount float64) *domain.Expense {
+func mustAdd(t *testing.T, es domain.ExpenseService, ownerID string, occurredAt time.Time, description string, amount float64) *domain.ExpenseView {
 	t.Helper()
-	e, err := es.Add(t.Context(), ownerID, occurredAt, description, amount)
+	e, err := es.Add(t.Context(), ownerID, occurredAt, description, amount, "")
 	if err != nil {
 		t.Fatalf("mustAdd: %v", err)
 	}
 	return e
+}
+
+func mustAddCategory(t *testing.T, cs domain.CategoryService, ownerID, name string) domain.CategoryView {
+	t.Helper()
+	v, err := cs.Add(t.Context(), ownerID, name)
+	if err != nil {
+		t.Fatalf("mustAddCategory: %v", err)
+	}
+	return v
 }
 
 // makeDate constructs a UTC timestamp for a given date, for use in tests.
@@ -144,6 +177,14 @@ func testSignUpDuplicateUsername(t *testing.T, factory func() TestApp) {
 	_, err := us.SignUp(t.Context(), "alice", "", "password123")
 	if !errors.Is(err, domain.ErrUsernameTaken) {
 		t.Errorf("expected ErrUsernameTaken, got %v", err)
+	}
+}
+
+func testSignUpReservedUsername(t *testing.T, factory func() TestApp) {
+	us := factory().UserService
+	_, err := us.SignUp(t.Context(), "system", "", "password123")
+	if !errors.Is(err, domain.ErrUsernameReserved) {
+		t.Errorf("expected ErrUsernameReserved, got %v", err)
 	}
 }
 
@@ -247,7 +288,7 @@ func testAddSuccess(t *testing.T, factory func() TestApp) {
 	us := app.UserService
 	es := app.ExpenseService
 	alice := mustSignUp(t, us, "alice", "password123")
-	e, err := es.Add(t.Context(), alice.ID, makeDate(2024, time.March, 5), "Coffee", 4.50)
+	e, err := es.Add(t.Context(), alice.ID, makeDate(2024, time.March, 5), "Coffee", 4.50, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -257,6 +298,9 @@ func testAddSuccess(t *testing.T, factory func() TestApp) {
 	if e.OwnerID != alice.ID {
 		t.Errorf("expected OwnerID %q, got %q", alice.ID, e.OwnerID)
 	}
+	if e.CategoryID != domain.UncategorisedCategoryID {
+		t.Errorf("expected default CategoryID %q, got %q", domain.UncategorisedCategoryID, e.CategoryID)
+	}
 }
 
 func testAddEmptyDescription(t *testing.T, factory func() TestApp) {
@@ -264,7 +308,7 @@ func testAddEmptyDescription(t *testing.T, factory func() TestApp) {
 	us := app.UserService
 	es := app.ExpenseService
 	alice := mustSignUp(t, us, "alice", "password123")
-	_, err := es.Add(t.Context(), alice.ID, makeDate(2024, time.March, 5), "", 4.50)
+	_, err := es.Add(t.Context(), alice.ID, makeDate(2024, time.March, 5), "", 4.50, "")
 	if !errors.Is(err, domain.ErrDescriptionEmpty) {
 		t.Errorf("expected ErrDescriptionEmpty, got %v", err)
 	}
@@ -276,12 +320,12 @@ func testAddNonPositiveAmount(t *testing.T, factory func() TestApp) {
 	es := app.ExpenseService
 	alice := mustSignUp(t, us, "alice", "password123")
 
-	_, err := es.Add(t.Context(), alice.ID, makeDate(2024, time.March, 5), "Coffee", 0)
+	_, err := es.Add(t.Context(), alice.ID, makeDate(2024, time.March, 5), "Coffee", 0, "")
 	if !errors.Is(err, domain.ErrAmountNotPositive) {
 		t.Errorf("expected ErrAmountNotPositive for zero amount, got %v", err)
 	}
 
-	_, err = es.Add(t.Context(), alice.ID, makeDate(2024, time.March, 5), "Coffee", -5)
+	_, err = es.Add(t.Context(), alice.ID, makeDate(2024, time.March, 5), "Coffee", -5, "")
 	if !errors.Is(err, domain.ErrAmountNotPositive) {
 		t.Errorf("expected ErrAmountNotPositive for negative amount, got %v", err)
 	}
@@ -294,7 +338,7 @@ func testUpdateSuccess(t *testing.T, factory func() TestApp) {
 	alice := mustSignUp(t, us, "alice", "password123")
 	e := mustAdd(t, es, alice.ID, makeDate(2024, time.March, 5), "Coffee", 4.50)
 
-	updated, err := es.Update(t.Context(), alice.ID, e.ID, "Fancy Coffee", makeDate(2024, time.March, 6), 6.00)
+	updated, err := es.Update(t.Context(), alice.ID, e.ID, "Fancy Coffee", makeDate(2024, time.March, 6), 6.00, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -314,7 +358,7 @@ func testUpdateWrongOwner(t *testing.T, factory func() TestApp) {
 	bob := mustSignUp(t, us, "bob", "password123")
 	e := mustAdd(t, es, alice.ID, makeDate(2024, time.March, 5), "Coffee", 4.50)
 
-	_, err := es.Update(t.Context(), bob.ID, e.ID, "Stolen Coffee", makeDate(2024, time.March, 5), 4.50)
+	_, err := es.Update(t.Context(), bob.ID, e.ID, "Stolen Coffee", makeDate(2024, time.March, 5), 4.50, "")
 	if !errors.Is(err, domain.ErrExpenseNotOwned) {
 		t.Errorf("expected ErrExpenseNotOwned, got %v", err)
 	}
@@ -489,5 +533,198 @@ func testQueryByIDExpenseWrongOwner(t *testing.T, factory func() TestApp) {
 	_, err := app.ExpenseService.QueryByID(t.Context(), bob.ID, e.ID)
 	if !errors.Is(err, domain.ErrExpenseNotOwned) {
 		t.Errorf("expected ErrExpenseNotOwned, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CategoryService tests
+// ---------------------------------------------------------------------------
+
+func testCategoryAddSuccess(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	v := mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+	if v.ID == "" {
+		t.Error("expected non-empty category ID")
+	}
+	if v.Name != "Food" {
+		t.Errorf("expected name 'Food', got %q", v.Name)
+	}
+	if v.OwnerID != alice.ID {
+		t.Errorf("expected OwnerID %q, got %q", alice.ID, v.OwnerID)
+	}
+}
+
+func testCategoryAddEmptyName(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	_, err := app.CategoryService.Add(t.Context(), alice.ID, "")
+	if !errors.Is(err, domain.ErrCategoryNameEmpty) {
+		t.Errorf("expected ErrCategoryNameEmpty, got %v", err)
+	}
+}
+
+func testCategoryAddDuplicateName(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+	_, err := app.CategoryService.Add(t.Context(), alice.ID, "Food")
+	if !errors.Is(err, domain.ErrCategoryNameTaken) {
+		t.Errorf("expected ErrCategoryNameTaken, got %v", err)
+	}
+}
+
+func testCategoryAddCaseInsensitiveDuplicate(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+	_, err := app.CategoryService.Add(t.Context(), alice.ID, "food")
+	if !errors.Is(err, domain.ErrCategoryNameTaken) {
+		t.Errorf("expected ErrCategoryNameTaken for case-insensitive duplicate, got %v", err)
+	}
+}
+
+func testCategoryUpdateSuccess(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	v := mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+
+	updated, err := app.CategoryService.Update(t.Context(), alice.ID, v.ID, "Groceries")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.Name != "Groceries" {
+		t.Errorf("expected name 'Groceries', got %q", updated.Name)
+	}
+}
+
+func testCategoryUpdateWrongOwner(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	bob := mustSignUp(t, app.UserService, "bob", "password123")
+	v := mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+
+	_, err := app.CategoryService.Update(t.Context(), bob.ID, v.ID, "Stolen")
+	if !errors.Is(err, domain.ErrCategoryNotOwned) {
+		t.Errorf("expected ErrCategoryNotOwned, got %v", err)
+	}
+}
+
+func testCategoryUpdateNotFound(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+
+	_, err := app.CategoryService.Update(t.Context(), alice.ID, "nonexistent-id", "Whatever")
+	if !errors.Is(err, domain.ErrCategoryNotFound) {
+		t.Errorf("expected ErrCategoryNotFound, got %v", err)
+	}
+}
+
+func testCategoryDeleteSuccess(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	v := mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+
+	if err := app.CategoryService.Delete(t.Context(), alice.ID, v.ID); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err := app.CategoryService.Update(t.Context(), alice.ID, v.ID, "Whatever")
+	if !errors.Is(err, domain.ErrCategoryNotFound) {
+		t.Errorf("expected ErrCategoryNotFound after delete, got %v", err)
+	}
+}
+
+func testCategoryDeleteWrongOwner(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	bob := mustSignUp(t, app.UserService, "bob", "password123")
+	v := mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+
+	err := app.CategoryService.Delete(t.Context(), bob.ID, v.ID)
+	if !errors.Is(err, domain.ErrCategoryNotOwned) {
+		t.Errorf("expected ErrCategoryNotOwned, got %v", err)
+	}
+}
+
+func testCategoryDeleteUncategorised(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+
+	err := app.CategoryService.Delete(t.Context(), alice.ID, domain.UncategorisedCategoryID)
+	if !errors.Is(err, domain.ErrCategoryNotDeletable) {
+		t.Errorf("expected ErrCategoryNotDeletable, got %v", err)
+	}
+}
+
+func testCategoryQueryAll(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+	mustAddCategory(t, app.CategoryService, alice.ID, "Transport")
+
+	// Blank prefix returns all categories (including the seeded Uncategorised).
+	views, err := app.CategoryService.Query(t.Context(), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(views) < 2 {
+		t.Errorf("expected at least 2 categories, got %d", len(views))
+	}
+}
+
+func testCategoryQueryPrefix(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+	mustAddCategory(t, app.CategoryService, alice.ID, "Fuel")
+	mustAddCategory(t, app.CategoryService, alice.ID, "Transport")
+
+	views, err := app.CategoryService.Query(t.Context(), "F")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(views) != 2 {
+		t.Errorf("expected 2 categories with prefix 'F', got %d", len(views))
+	}
+}
+
+func testCategoryQueryPrefixCaseInsensitive(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+
+	views, err := app.CategoryService.Query(t.Context(), "fo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(views) != 1 {
+		t.Errorf("expected 1 category with prefix 'fo', got %d", len(views))
+	}
+}
+
+func testCategoryDeleteReclassifiesExpenses(t *testing.T, factory func() TestApp) {
+	app := factory()
+	alice := mustSignUp(t, app.UserService, "alice", "password123")
+	food := mustAddCategory(t, app.CategoryService, alice.ID, "Food")
+
+	// Add an expense in the Food category.
+	e, err := app.ExpenseService.Add(t.Context(), alice.ID, makeDate(2024, time.January, 1), "Lunch", 12.50, food.ID)
+	if err != nil {
+		t.Fatalf("unexpected error adding expense: %v", err)
+	}
+
+	// Delete the Food category.
+	if err := app.CategoryService.Delete(t.Context(), alice.ID, food.ID); err != nil {
+		t.Fatalf("unexpected error deleting category: %v", err)
+	}
+
+	// The expense should now be in Uncategorised.
+	view, err := app.ExpenseService.QueryByID(t.Context(), alice.ID, e.ID)
+	if err != nil {
+		t.Fatalf("unexpected error querying expense: %v", err)
+	}
+	if view.CategoryID != domain.UncategorisedCategoryID {
+		t.Errorf("expected CategoryID %q after reclassification, got %q", domain.UncategorisedCategoryID, view.CategoryID)
 	}
 }

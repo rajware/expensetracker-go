@@ -9,6 +9,7 @@
 //
 //	userRepo := store.UserRepository()
 //	expenseRepo := store.ExpenseRepository()
+//	categoryRepo := store.CategoryRepository()
 package postgres
 
 import (
@@ -27,16 +28,16 @@ const advisoryLockKey = 8472983645
 
 // currentSchemaVersion is the schema version this binary requires.
 // Ready returns an error if the database schema is older than this.
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 // Store holds the database connection pool and vends repository implementations.
 type Store struct {
 	db *sql.DB
 }
 
-// Open connects to the PostgreSQL database at the given URL, runs migrations
-// under an advisory lock so that concurrent instances do not conflict, and
-// returns a ready-to-use Store.
+// Open connects to the PostgreSQL database at the given URL, runs all pending
+// schema migrations under an advisory lock, and returns a Store whose schema
+// is guaranteed to be at currentSchemaVersion.
 //
 // The advisory lock is acquired on a dedicated connection and released
 // when that connection closes — whether by normal completion,
@@ -98,6 +99,11 @@ func (s *Store) ExpenseRepository() *ExpenseRepository {
 	return &ExpenseRepository{db: s.db}
 }
 
+// CategoryRepository returns a CategoryRepository backed by this store.
+func (s *Store) CategoryRepository() *CategoryRepository {
+	return &CategoryRepository{db: s.db}
+}
+
 // migrate acquires an advisory lock on a dedicated connection, applies all
 // schema migrations, then removes the lock and closes the connection.
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -140,6 +146,12 @@ func migrateSchema(ctx context.Context, conn *sql.Conn) error {
 
 	if version < 1 {
 		if err := migrateStep1(ctx, conn); err != nil {
+			return err
+		}
+	}
+
+	if version < 2 {
+		if err := migrateStep2(ctx, conn); err != nil {
 			return err
 		}
 	}
@@ -198,6 +210,85 @@ func migrateStep1(ctx context.Context, conn *sql.Conn) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("postgres.migrate step 1: %w", err)
+	}
+	return nil
+}
+
+// migrateStep2 adds the categories table, adds category_id to expenses,
+// seeds the system user and Uncategorised category, then records schema
+// version 2.
+//
+// category_id on expenses is nullable and defaults to UncategorisedCategoryID,
+// so existing rows are automatically assigned to Uncategorised.
+//
+// A trigger function reclassifies expenses to Uncategorised before a category
+// is deleted, fulfilling the CategoryRepository.Delete contract.
+func migrateStep2(ctx context.Context, conn *sql.Conn) error {
+	// Create the categories table and index first.
+	_, err := conn.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS categories (
+			id       TEXT PRIMARY KEY,
+			name     TEXT NOT NULL,
+			owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE (name)
+		);
+
+		CREATE UNIQUE INDEX IF NOT EXISTS categories_name_ci
+			ON categories (lower(name));
+	`)
+	if err != nil {
+		return fmt.Errorf("postgres.migrate step 2 (categories table): %w", err)
+	}
+
+	// Seed the system user and Uncategorised category before adding the FK
+	// column to expenses. The ALTER TABLE below applies the default to all
+	// existing rows, so the referenced row must exist first.
+	_, err = conn.ExecContext(ctx, `
+		INSERT INTO users (id, username, display_name, password_hash)
+			VALUES ('00000000-0000-0000-0000-000000000001', 'system', 'System', '!')
+			ON CONFLICT (id) DO NOTHING;
+
+		INSERT INTO categories (id, name, owner_id)
+			VALUES (
+				'00000000-0000-0000-0000-000000000002',
+				'Uncategorised',
+				'00000000-0000-0000-0000-000000000001'
+			)
+			ON CONFLICT (id) DO NOTHING;
+	`)
+	if err != nil {
+		return fmt.Errorf("postgres.migrate step 2 (seed data): %w", err)
+	}
+
+	// Now it is safe to add category_id with a FK reference and a default,
+	// because the referenced Uncategorised row already exists.
+	_, err = conn.ExecContext(ctx, `
+		ALTER TABLE expenses
+			ADD COLUMN IF NOT EXISTS category_id TEXT
+			REFERENCES categories(id)
+			DEFAULT '00000000-0000-0000-0000-000000000002';
+
+		CREATE OR REPLACE FUNCTION reclassify_expenses_on_category_delete()
+		RETURNS TRIGGER LANGUAGE plpgsql AS $$
+		BEGIN
+			IF OLD.id != '00000000-0000-0000-0000-000000000002' THEN
+				UPDATE expenses
+				SET category_id = '00000000-0000-0000-0000-000000000002'
+				WHERE category_id = OLD.id;
+			END IF;
+			RETURN OLD;
+		END;
+		$$;
+
+		CREATE OR REPLACE TRIGGER reclassify_expenses_on_category_delete
+			BEFORE DELETE ON categories
+			FOR EACH ROW EXECUTE FUNCTION reclassify_expenses_on_category_delete();
+
+		DELETE FROM schema_version;
+		INSERT INTO schema_version (version) VALUES (2);
+	`)
+	if err != nil {
+		return fmt.Errorf("postgres.migrate step 2: %w", err)
 	}
 	return nil
 }

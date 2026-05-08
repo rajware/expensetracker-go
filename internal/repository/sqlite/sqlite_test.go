@@ -23,8 +23,9 @@ func TestSQLiteStore(t *testing.T) {
 		t.Cleanup(func() { store.Close() })
 
 		return domaintest.TestApp{
-			UserService:    domain.NewUserService(store.UserRepository()),
-			ExpenseService: domain.NewExpenseService(store.ExpenseRepository()),
+			UserService:     domain.NewUserService(store.UserRepository()),
+			ExpenseService:  domain.NewExpenseService(store.ExpenseRepository(), store.CategoryRepository()),
+			CategoryService: domain.NewCategoryService(store.CategoryRepository()),
 		}
 	})
 }

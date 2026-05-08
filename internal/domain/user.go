@@ -60,6 +60,9 @@ func (s UserService) SignUp(ctx context.Context, username, displayName, password
 	if username == "" {
 		return nil, ErrUsernameEmpty
 	}
+	if username == "system" {
+		return nil, ErrUsernameReserved
+	}
 	if len(password) < 8 {
 		return nil, ErrPasswordTooShort
 	}

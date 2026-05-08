@@ -9,6 +9,7 @@
 //
 //	userRepo := store.UserRepository()
 //	expenseRepo := store.ExpenseRepository()
+//	categoryRepo := store.CategoryRepository()
 package sqlite
 
 import (
@@ -26,22 +27,23 @@ const defaultPath = "./data/expense_tracker.db"
 
 // currentSchemaVersion is the schema version this binary requires.
 // Ready returns an error if the database schema is older than this.
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 // Store holds the database connection and vends repository implementations.
 type Store struct {
 	db *sql.DB
 }
 
-// Open opens (or creates) the SQLite database at the given path, creates the
-// schema if needed, and returns a ready-to-use Store.
+// Open opens (or creates) the SQLite database at the given path, runs all
+// pending schema migrations, and returns a Store whose schema is guaranteed
+// to be at currentSchemaVersion.
 // Pass an empty string to use the default path.
 func Open(path string) (*Store, error) {
 	if path == "" {
 		path = defaultPath
 	}
 
-	// Ensure parent paths
+	// Ensure parent paths exist.
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, fmt.Errorf("creating database directory: %w", err)
 	}
@@ -83,6 +85,11 @@ func (s *Store) ExpenseRepository() *ExpenseRepository {
 	return &ExpenseRepository{db: s.db}
 }
 
+// CategoryRepository returns a CategoryRepository backed by this store.
+func (s *Store) CategoryRepository() *CategoryRepository {
+	return &CategoryRepository{db: s.db}
+}
+
 // Ready implements healthroutes.Checker. It pings the database and verifies
 // the schema is at least the version this binary requires.
 func (s *Store) Ready(ctx context.Context) error {
@@ -122,6 +129,12 @@ func (s *Store) migrate() error {
 
 	if version < 1 {
 		if err := s.migrateStep1(); err != nil {
+			return err
+		}
+	}
+
+	if version < 2 {
+		if err := s.migrateStep2(); err != nil {
 			return err
 		}
 	}
@@ -181,5 +194,55 @@ func (s *Store) migrateStep1() error {
 	}
 
 	log.Println("SQLite schema migration completed successfully.")
+	return nil
+}
+
+// migrateStep2 adds the categories table, adds category_id to expenses,
+// seeds the system user and Uncategorised category, then records schema
+// version 2.
+//
+// category_id on expenses is nullable and defaults to UncategorisedCategoryID,
+// so existing rows are automatically assigned to Uncategorised.
+//
+// On category delete, a trigger reclassifies affected expenses to Uncategorised,
+// fulfilling the CategoryRepository.Delete contract without requiring
+// application-level transactions.
+func (s *Store) migrateStep2() error {
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS categories (
+			id       TEXT PRIMARY KEY,
+			name     TEXT NOT NULL UNIQUE COLLATE NOCASE,
+			owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
+		);
+
+		ALTER TABLE expenses
+			ADD COLUMN category_id TEXT
+			DEFAULT '00000000-0000-0000-0000-000000000002';
+
+		INSERT OR IGNORE INTO users (id, username, display_name, password_hash)
+			VALUES ('00000000-0000-0000-0000-000000000001', 'system', 'System', '!');
+
+		INSERT OR IGNORE INTO categories (id, name, owner_id)
+			VALUES (
+				'00000000-0000-0000-0000-000000000002',
+				'Uncategorised',
+				'00000000-0000-0000-0000-000000000001'
+			);
+
+		CREATE TRIGGER IF NOT EXISTS reclassify_expenses_on_category_delete
+			BEFORE DELETE ON categories
+			BEGIN
+				UPDATE expenses
+				SET category_id = '00000000-0000-0000-0000-000000000002'
+				WHERE category_id = OLD.id
+				  AND OLD.id != '00000000-0000-0000-0000-000000000002';
+			END;
+
+		DELETE FROM schema_version;
+		INSERT INTO schema_version (version) VALUES (2);
+	`)
+	if err != nil {
+		return fmt.Errorf("sqlite.migrate step 2: %w", err)
+	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 type Expense struct {
 	ID          string
 	OwnerID     string // User.ID of the owner
+	CategoryID  string // Category.ID; defaults to UncategorisedCategoryID
 	OccurredAt  time.Time
 	Description string
 	Amount      float64 // in the user's currency; always positive
@@ -20,22 +21,26 @@ type Expense struct {
 // ExpenseView is the "display" representation of an Expense.
 // Currently identical, but may diverge in the future.
 type ExpenseView struct {
-	ID          string    `json:"id"`
-	OwnerID     string    `json:"owner_id"`
-	OccurredAt  time.Time `json:"occurred_at"`
-	Description string    `json:"description"`
-	Amount      float64   `json:"amount"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	OwnerID      string    `json:"owner_id"`
+	CategoryID   string    `json:"category_id"`
+	CategoryName string    `json:"category_name"`
+	OccurredAt   time.Time `json:"occurred_at"`
+	Description  string    `json:"description"`
+	Amount       float64   `json:"amount"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
-func NewExpenseView(expense Expense) ExpenseView {
+func NewExpenseView(expense Expense, categoryName string) ExpenseView {
 	return ExpenseView{
-		ID:          expense.ID,
-		OwnerID:     expense.OwnerID,
-		OccurredAt:  expense.OccurredAt,
-		Description: expense.Description,
-		Amount:      expense.Amount,
-		CreatedAt:   expense.CreatedAt,
+		ID:           expense.ID,
+		OwnerID:      expense.OwnerID,
+		CategoryID:   expense.CategoryID,
+		CategoryName: categoryName,
+		OccurredAt:   expense.OccurredAt,
+		Description:  expense.Description,
+		Amount:       expense.Amount,
+		CreatedAt:    expense.CreatedAt,
 	}
 }
 
@@ -57,6 +62,9 @@ type ExpenseQuery struct {
 	// From and To filter by OccurredAt. A nil pointer means no bound.
 	From *time.Time
 	To   *time.Time
+
+	// CategoryID filters by category. Empty means no filter.
+	CategoryID string
 
 	SortBy   ExpenseSortField
 	SortDesc bool // if false, sort ascending
@@ -95,26 +103,32 @@ type ExpenseRepository interface {
 
 // ExpenseService contains business logic for Expense operations.
 type ExpenseService struct {
-	expenses ExpenseRepository
+	expenses   ExpenseRepository
+	categories CategoryRepository
 }
 
-// NewExpenseService constructs an ExpenseService with the given repository.
-func NewExpenseService(expenses ExpenseRepository) ExpenseService {
-	return ExpenseService{expenses: expenses}
+// NewExpenseService constructs an ExpenseService with the given repositories.
+func NewExpenseService(expenses ExpenseRepository, categories CategoryRepository) ExpenseService {
+	return ExpenseService{expenses: expenses, categories: categories}
 }
 
 // Add records a new expense for the given owner.
-func (s ExpenseService) Add(ctx context.Context, ownerID string, occurredAt time.Time, description string, amount float64) (*Expense, error) {
+// If categoryID is empty, the expense is assigned to UncategorisedCategoryID.
+func (s ExpenseService) Add(ctx context.Context, ownerID string, occurredAt time.Time, description string, amount float64, categoryID string) (*ExpenseView, error) {
 	if description == "" {
 		return nil, ErrDescriptionEmpty
 	}
 	if amount <= 0 {
 		return nil, ErrAmountNotPositive
 	}
+	if categoryID == "" {
+		categoryID = UncategorisedCategoryID
+	}
 
 	expense := &Expense{
 		ID:          uuid.NewString(),
 		OwnerID:     ownerID,
+		CategoryID:  categoryID,
 		OccurredAt:  occurredAt,
 		Description: description,
 		Amount:      amount,
@@ -125,11 +139,18 @@ func (s ExpenseService) Add(ctx context.Context, ownerID string, occurredAt time
 		return nil, err
 	}
 
-	return expense, nil
+	categoryName, err := s.resolveCategoryName(ctx, expense.CategoryID)
+	if err != nil {
+		return nil, err
+	}
+	expenseview := NewExpenseView(*expense, categoryName)
+
+	return &expenseview, nil
 }
 
 // Update modifies an existing expense. Only the owner may update it.
-func (s ExpenseService) Update(ctx context.Context, ownerID string, id, description string, occurredAt time.Time, amount float64) (*Expense, error) {
+// If categoryID is empty, the existing CategoryID is preserved.
+func (s ExpenseService) Update(ctx context.Context, ownerID string, id, description string, occurredAt time.Time, amount float64, categoryID string) (*ExpenseView, error) {
 	expense, err := s.expenses.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -147,12 +168,21 @@ func (s ExpenseService) Update(ctx context.Context, ownerID string, id, descript
 	expense.Description = description
 	expense.OccurredAt = occurredAt
 	expense.Amount = amount
+	if categoryID != "" {
+		expense.CategoryID = categoryID
+	}
 
 	if err := s.expenses.Update(ctx, expense); err != nil {
 		return nil, err
 	}
 
-	return expense, nil
+	categoryName, err := s.resolveCategoryName(ctx, expense.CategoryID)
+	if err != nil {
+		return nil, err
+	}
+	expenseview := NewExpenseView(*expense, categoryName)
+
+	return &expenseview, nil
 }
 
 // Delete removes an expense. Only the owner may delete it.
@@ -182,6 +212,23 @@ func (s ExpenseService) QueryByID(ctx context.Context, ownerID, id string) (*Exp
 	if expense.OwnerID != ownerID {
 		return nil, ErrExpenseNotOwned
 	}
-	view := NewExpenseView(*expense)
+	categoryName, err := s.resolveCategoryName(ctx, expense.CategoryID)
+	if err != nil {
+		return nil, err
+	}
+	view := NewExpenseView(*expense, categoryName)
 	return &view, nil
+}
+
+// resolveCategoryName looks up the name for a category ID.
+// Returns an empty string if the ID is empty.
+func (s ExpenseService) resolveCategoryName(ctx context.Context, categoryID string) (string, error) {
+	if categoryID == "" {
+		return "", nil
+	}
+	cat, err := s.categories.GetByID(ctx, categoryID)
+	if err != nil {
+		return "", err
+	}
+	return cat.Name, nil
 }

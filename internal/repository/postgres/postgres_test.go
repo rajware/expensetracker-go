@@ -9,13 +9,12 @@ import (
 	"github.com/rajware/expensetracker-go/internal/repository/postgres"
 )
 
-// TestPostgresStore runs the full domain contract test suite against the Postgres
-// repository implementations.
+// TestPostgresStore runs the full domain contract test suite against the
+// PostgreSQL repository implementations.
 func TestPostgresStore(t *testing.T) {
 	domaintest.RunSuite(t, func() domaintest.TestApp {
 		url := "postgres://testuser:testpassword@localhost:15432"
-		// // ":memory:" gives a fresh, empty SQLite database for each call.
-		// store, err := sqlite.Open(":memory:")
+
 		db, err := sql.Open("pgx", url)
 		if err != nil {
 			t.Fatalf("postgres.pre-Open: %v", err)
@@ -36,12 +35,12 @@ func TestPostgresStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("postgres.Open: %v", err)
 		}
-
 		t.Cleanup(func() { store.Close() })
 
 		return domaintest.TestApp{
-			UserService:    domain.NewUserService(store.UserRepository()),
-			ExpenseService: domain.NewExpenseService(store.ExpenseRepository()),
+			UserService:     domain.NewUserService(store.UserRepository()),
+			ExpenseService:  domain.NewExpenseService(store.ExpenseRepository(), store.CategoryRepository()),
+			CategoryService: domain.NewCategoryService(store.CategoryRepository()),
 		}
 	})
 }

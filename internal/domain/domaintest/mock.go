@@ -5,21 +5,57 @@ package domaintest
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/rajware/expensetracker-go/internal/domain"
 )
 
-// NewMockApp returns an "app" object containing all services
+// NewMockApp returns a fully wired in-memory app, seeded with the system user
+// and the Uncategorised category.
 func NewMockApp() TestApp {
 	expenseRepo := NewMockExpenseRepository()
+	categoryRepo := NewMockCategoryRepository(expenseRepo)
+	// Wire the category repo back into the expense repo so Query can resolve names.
+	expenseRepo.categoryrepo = categoryRepo
 	userRepo := NewMockUserRepository(expenseRepo)
 
+	seedSystemData(userRepo, categoryRepo)
+
 	return TestApp{
-		UserService:    domain.NewUserService(userRepo),
-		ExpenseService: domain.NewExpenseService(expenseRepo),
+		UserService:     domain.NewUserService(userRepo),
+		ExpenseService:  domain.NewExpenseService(expenseRepo, categoryRepo),
+		CategoryService: domain.NewCategoryService(categoryRepo),
 	}
 }
+
+// seedSystemData inserts the system user and Uncategorised category.
+// Both have fixed IDs defined as constants in the domain package.
+func seedSystemData(users *MockUserRepository, categories *MockCategoryRepository) {
+	systemUser := &domain.User{
+		ID:           domain.SystemUserID,
+		Username:     "system",
+		DisplayName:  "System",
+		PasswordHash: "!", // can never be a valid bcrypt hash; account is locked
+	}
+	// Bypass the username-uniqueness check by inserting directly into the map.
+	users.mu.Lock()
+	users.users[systemUser.ID] = systemUser
+	users.mu.Unlock()
+
+	uncategorised := &domain.Category{
+		ID:      domain.UncategorisedCategoryID,
+		Name:    "Uncategorised",
+		OwnerID: domain.SystemUserID,
+	}
+	categories.mu.Lock()
+	categories.categories[uncategorised.ID] = uncategorised
+	categories.mu.Unlock()
+}
+
+// ---------------------------------------------------------------------------
+// MockUserRepository
+// ---------------------------------------------------------------------------
 
 // MockUserRepository is a thread-safe, in-memory UserRepository.
 type MockUserRepository struct {
@@ -29,8 +65,7 @@ type MockUserRepository struct {
 }
 
 // NewMockUserRepository constructs a MockUserRepository.
-// It needs a domain.ExpenseRepository to ensure user
-// delete cascading.
+// It needs a domain.ExpenseRepository to ensure user delete cascading.
 func NewMockUserRepository(expenseRepo *MockExpenseRepository) *MockUserRepository {
 	return &MockUserRepository{
 		users:       make(map[string]*domain.User),
@@ -76,7 +111,6 @@ func (r *MockUserRepository) GetByUsername(ctx context.Context, username string)
 	return nil, domain.ErrUserNotFound
 }
 
-// Delete removes the user
 func (r *MockUserRepository) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -92,7 +126,6 @@ func (r *MockUserRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Update updates the user's display name only
 func (r *MockUserRepository) Update(ctx context.Context, user *domain.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -107,7 +140,6 @@ func (r *MockUserRepository) Update(ctx context.Context, user *domain.User) erro
 	return nil
 }
 
-// UpdatePassword updates the user's password hash
 func (r *MockUserRepository) UpdatePassword(ctx context.Context, id, hash string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -122,15 +154,19 @@ func (r *MockUserRepository) UpdatePassword(ctx context.Context, id, hash string
 	return nil
 }
 
-// ---
+// ---------------------------------------------------------------------------
+// MockExpenseRepository
+// ---------------------------------------------------------------------------
 
 // MockExpenseRepository is a thread-safe, in-memory ExpenseRepository.
 type MockExpenseRepository struct {
-	mu       sync.RWMutex
-	expenses map[string]*domain.Expense // keyed by ID
+	mu           sync.RWMutex
+	expenses     map[string]*domain.Expense // keyed by ID
+	categoryrepo *MockCategoryRepository
 }
 
 // NewMockExpenseRepository constructs a MockExpenseRepository.
+// Call expenseRepo.categoryrepo = categoryRepo after constructing both repos.
 func NewMockExpenseRepository() *MockExpenseRepository {
 	return &MockExpenseRepository{
 		expenses: make(map[string]*domain.Expense),
@@ -181,7 +217,7 @@ func (r *MockExpenseRepository) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-func (r *MockExpenseRepository) Query(_ context.Context, ownerID string, q domain.ExpenseQuery) (domain.ExpenseResult, error) {
+func (r *MockExpenseRepository) Query(ctx context.Context, ownerID string, q domain.ExpenseQuery) (domain.ExpenseResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -196,8 +232,12 @@ func (r *MockExpenseRepository) Query(_ context.Context, ownerID string, q domai
 		if q.To != nil && e.OccurredAt.After(*q.To) {
 			continue
 		}
+		if q.CategoryID != "" && e.CategoryID != q.CategoryID {
+			continue
+		}
 
-		matched = append(matched, domain.NewExpenseView(*e))
+		categoryName := r.categoryrepo.nameByID(e.CategoryID)
+		matched = append(matched, domain.NewExpenseView(*e, categoryName))
 	}
 
 	sort.Slice(matched, func(i, j int) bool {
@@ -250,4 +290,147 @@ func (r *MockExpenseRepository) deleteByUser(userID string) {
 			delete(r.expenses, id)
 		}
 	}
+}
+
+// reclassifyExpenses is an internal helper called by MockCategoryRepository.Delete.
+// It reassigns all expenses in fromCategoryID to toCategoryID.
+// It is not part of the ExpenseRepository interface.
+func (r *MockExpenseRepository) reclassifyExpenses(fromCategoryID, toCategoryID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, e := range r.expenses {
+		if e.CategoryID == fromCategoryID {
+			e.CategoryID = toCategoryID
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MockCategoryRepository
+// ---------------------------------------------------------------------------
+
+// MockCategoryRepository is a thread-safe, in-memory CategoryRepository.
+type MockCategoryRepository struct {
+	mu          sync.RWMutex
+	categories  map[string]*domain.Category // keyed by ID
+	expenserepo *MockExpenseRepository
+}
+
+// NewMockCategoryRepository constructs a MockCategoryRepository.
+// It needs a MockExpenseRepository to reclassify expenses on category delete.
+func NewMockCategoryRepository(expenseRepo *MockExpenseRepository) *MockCategoryRepository {
+	return &MockCategoryRepository{
+		categories:  make(map[string]*domain.Category),
+		expenserepo: expenseRepo,
+	}
+}
+
+func (r *MockCategoryRepository) Create(_ context.Context, category *domain.Category) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, c := range r.categories {
+		if strings.EqualFold(c.Name, category.Name) {
+			return domain.ErrCategoryNameTaken
+		}
+	}
+
+	stored := *category
+	r.categories[category.ID] = &stored
+	return nil
+}
+
+func (r *MockCategoryRepository) GetByID(_ context.Context, id string) (*domain.Category, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	c, ok := r.categories[id]
+	if !ok {
+		return nil, domain.ErrCategoryNotFound
+	}
+	stored := *c
+	return &stored, nil
+}
+
+func (r *MockCategoryRepository) GetByName(_ context.Context, name string) (*domain.Category, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, c := range r.categories {
+		if strings.EqualFold(c.Name, name) {
+			stored := *c
+			return &stored, nil
+		}
+	}
+	return nil, domain.ErrCategoryNotFound
+}
+
+func (r *MockCategoryRepository) Update(_ context.Context, category *domain.Category) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.categories[category.ID]; !ok {
+		return domain.ErrCategoryNotFound
+	}
+
+	// Check the new name is not taken by a different category.
+	for _, c := range r.categories {
+		if c.ID != category.ID && strings.EqualFold(c.Name, category.Name) {
+			return domain.ErrCategoryNameTaken
+		}
+	}
+
+	stored := *category
+	r.categories[category.ID] = &stored
+	return nil
+}
+
+// Delete removes the category and reclassifies its expenses to Uncategorised.
+// This mirrors the ON DELETE SET DEFAULT behaviour of the SQL backends.
+func (r *MockCategoryRepository) Delete(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.categories[id]; !ok {
+		return domain.ErrCategoryNotFound
+	}
+	delete(r.categories, id)
+
+	// Reclassify affected expenses — fulfils the CategoryRepository.Delete contract.
+	r.expenserepo.reclassifyExpenses(id, domain.UncategorisedCategoryID)
+
+	return nil
+}
+
+func (r *MockCategoryRepository) Query(_ context.Context, prefix string) ([]*domain.Category, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*domain.Category
+	for _, c := range r.categories {
+		if prefix == "" || strings.HasPrefix(strings.ToLower(c.Name), strings.ToLower(prefix)) {
+			stored := *c
+			result = append(result, &stored)
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+
+	return result, nil
+}
+
+// nameByID returns the category name for a given ID, or an empty string if
+// not found. Used internally by MockExpenseRepository.Query to resolve names
+// without holding the category lock (the caller must not hold it either).
+func (r *MockCategoryRepository) nameByID(id string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if c, ok := r.categories[id]; ok {
+		return c.Name
+	}
+	return ""
 }

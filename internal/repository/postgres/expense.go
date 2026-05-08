@@ -17,9 +17,9 @@ type ExpenseRepository struct {
 
 func (r *ExpenseRepository) Create(ctx context.Context, e *domain.Expense) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO expenses (id, owner_id, occurred_at, description, amount, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		e.ID, e.OwnerID, e.OccurredAt.UTC(), e.Description, e.Amount, e.CreatedAt.UTC(),
+		`INSERT INTO expenses (id, owner_id, category_id, occurred_at, description, amount, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		e.ID, e.OwnerID, e.CategoryID, e.OccurredAt.UTC(), e.Description, e.Amount, e.CreatedAt.UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("ExpenseRepository.Create: %w", err)
@@ -29,7 +29,7 @@ func (r *ExpenseRepository) Create(ctx context.Context, e *domain.Expense) error
 
 func (r *ExpenseRepository) GetByID(ctx context.Context, id string) (*domain.Expense, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, owner_id, occurred_at, description, amount, created_at
+		`SELECT id, owner_id, category_id, occurred_at, description, amount, created_at
 		 FROM expenses WHERE id = $1`, id,
 	)
 	e, err := scanExpense(row)
@@ -44,8 +44,10 @@ func (r *ExpenseRepository) GetByID(ctx context.Context, id string) (*domain.Exp
 
 func (r *ExpenseRepository) Update(ctx context.Context, e *domain.Expense) error {
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE expenses SET description = $1, occurred_at = $2, amount = $3 WHERE id = $4`,
-		e.Description, e.OccurredAt.UTC(), e.Amount, e.ID,
+		`UPDATE expenses
+		 SET description = $1, occurred_at = $2, amount = $3, category_id = $4
+		 WHERE id = $5`,
+		e.Description, e.OccurredAt.UTC(), e.Amount, e.CategoryID, e.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("ExpenseRepository.Update: %w", err)
@@ -76,30 +78,34 @@ func (r *ExpenseRepository) Delete(ctx context.Context, id string) error {
 }
 
 // Query returns a filtered, sorted, paginated set of expenses for a user.
-// Filtering and sorting are done in SQL; pagination is applied after counting.
+// It JOINs the categories table to include the category name in each view.
 func (r *ExpenseRepository) Query(ctx context.Context, ownerID string, q domain.ExpenseQuery) (domain.ExpenseResult, error) {
 	// Build WHERE clause. Parameters are numbered from $1.
-	where := []string{"owner_id = $1"}
+	where := []string{"e.owner_id = $1"}
 	args := []any{ownerID}
 
 	if q.From != nil {
 		args = append(args, q.From.UTC())
-		where = append(where, fmt.Sprintf("occurred_at >= $%d", len(args)))
+		where = append(where, fmt.Sprintf("e.occurred_at >= $%d", len(args)))
 	}
 	if q.To != nil {
 		args = append(args, q.To.UTC())
-		where = append(where, fmt.Sprintf("occurred_at <= $%d", len(args)))
+		where = append(where, fmt.Sprintf("e.occurred_at <= $%d", len(args)))
+	}
+	if q.CategoryID != "" {
+		args = append(args, q.CategoryID)
+		where = append(where, fmt.Sprintf("e.category_id = $%d", len(args)))
 	}
 
 	whereClause := strings.Join(where, " AND ")
 
 	// Determine sort column.
-	sortCol := "occurred_at"
+	sortCol := "e.occurred_at"
 	switch q.SortBy {
 	case domain.SortByDescription:
-		sortCol = "description"
+		sortCol = "e.description"
 	case domain.SortByAmount:
-		sortCol = "amount"
+		sortCol = "e.amount"
 	}
 	sortDir := "ASC"
 	if q.SortDesc {
@@ -108,7 +114,7 @@ func (r *ExpenseRepository) Query(ctx context.Context, ownerID string, q domain.
 
 	// Count total matching rows (ignoring pagination).
 	countRow := r.db.QueryRowContext(ctx,
-		fmt.Sprintf(`SELECT COUNT(*) FROM expenses WHERE %s`, whereClause),
+		fmt.Sprintf(`SELECT COUNT(*) FROM expenses e WHERE %s`, whereClause),
 		args...,
 	)
 	var total int
@@ -116,10 +122,12 @@ func (r *ExpenseRepository) Query(ctx context.Context, ownerID string, q domain.
 		return domain.ExpenseResult{}, fmt.Errorf("ExpenseRepository.Query count: %w", err)
 	}
 
-	// Fetch page.
+	// Fetch page, joining categories for the name.
 	query := fmt.Sprintf(
-		`SELECT id, owner_id, occurred_at, description, amount, created_at
-		 FROM expenses WHERE %s ORDER BY %s %s`,
+		`SELECT e.id, e.owner_id, e.category_id, c.name, e.occurred_at, e.description, e.amount, e.created_at
+		 FROM expenses e
+		 LEFT JOIN categories c ON c.id = e.category_id
+		 WHERE %s ORDER BY %s %s`,
 		whereClause, sortCol, sortDir,
 	)
 
@@ -141,11 +149,11 @@ func (r *ExpenseRepository) Query(ctx context.Context, ownerID string, q domain.
 
 	var expenses []domain.ExpenseView
 	for rows.Next() {
-		e, err := scanExpenseRow(rows)
+		e, categoryName, err := scanExpenseRow(rows)
 		if err != nil {
 			return domain.ExpenseResult{}, fmt.Errorf("ExpenseRepository.Query scan: %w", err)
 		}
-		expenses = append(expenses, domain.NewExpenseView(*e))
+		expenses = append(expenses, domain.NewExpenseView(*e, categoryName))
 	}
 	if err := rows.Err(); err != nil {
 		return domain.ExpenseResult{}, fmt.Errorf("ExpenseRepository.Query rows: %w", err)
@@ -158,20 +166,30 @@ func (r *ExpenseRepository) Query(ctx context.Context, ownerID string, q domain.
 // PostgreSQL scans TIMESTAMPTZ directly into time.Time; no string parsing needed.
 func scanExpense(row *sql.Row) (*domain.Expense, error) {
 	var e domain.Expense
-	err := row.Scan(&e.ID, &e.OwnerID, &e.OccurredAt, &e.Description, &e.Amount, &e.CreatedAt)
+	var categoryID sql.NullString
+	err := row.Scan(&e.ID, &e.OwnerID, &categoryID, &e.OccurredAt, &e.Description, &e.Amount, &e.CreatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if categoryID.Valid {
+		e.CategoryID = categoryID.String
 	}
 	return &e, nil
 }
 
-// scanExpenseRow reads a single Expense from *sql.Rows (during iteration).
+// scanExpenseRow reads a single Expense and its category name from *sql.Rows
+// (during Query iteration). Returns the expense and the category name.
 // PostgreSQL scans TIMESTAMPTZ directly into time.Time; no string parsing needed.
-func scanExpenseRow(rows *sql.Rows) (*domain.Expense, error) {
+func scanExpenseRow(rows *sql.Rows) (*domain.Expense, string, error) {
 	var e domain.Expense
-	err := rows.Scan(&e.ID, &e.OwnerID, &e.OccurredAt, &e.Description, &e.Amount, &e.CreatedAt)
+	var categoryID sql.NullString
+	var categoryName sql.NullString
+	err := rows.Scan(&e.ID, &e.OwnerID, &categoryID, &categoryName, &e.OccurredAt, &e.Description, &e.Amount, &e.CreatedAt)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return &e, nil
+	if categoryID.Valid {
+		e.CategoryID = categoryID.String
+	}
+	return &e, categoryName.String, nil
 }
