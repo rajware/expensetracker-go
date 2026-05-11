@@ -8,7 +8,8 @@ Expense Tracker is a personal finance application designed to help users monitor
 ## Key Features
 
 - **Personalized Expense Tracking**: Record expenses with descriptions, amounts, and dates.
-- **Expense Dashboard**: View expenses with a modern UI, featuring pagination, sorting, and date filtering.
+- **Category Management**: Organize spending with user-defined categories.
+- **Expense Dashboard**: View expenses with a modern UI, featuring pagination, sorting, and date/category filtering.
 - **Secure Authentication**: Session-based authentication with HMAC-signed cookies and password management.
 - **Multi-Database Support**: Use SQLite for local use and PostgreSQL for production-grade deployments.
 - **Container Ready**: Ready to deploy on Docker, Kubernetes, or OpenShift.
